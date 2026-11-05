@@ -30,8 +30,9 @@ APP_EXE = "CUKTECH.exe"
 # 装完复制到程序目录根下，用户双击就能看历次改了什么。
 CHANGELOG_NAME = "版本更新说明.md"
 # 构建时由 build_installer.py 用 desktop/version.py 的值覆盖（唯一来源），
-# 这里的值只是「直接手跑 installer.py」时的兜底。
-VERSION = "1.3.0"
+# 这里的值只是「直接手跑 installer.py」时的兜底 —— 但它必须跟版本号一起改，
+# 否则兜底路径会写出一个「装完显示旧版本」的安装器（v1.4.1 之前一直停在 1.3.0）。
+VERSION = "1.5.0"
 PUBLISHER = "CUKTECH Desktop"
 
 # 不能只信环境变量：从某些宿主（服务、计划任务、精简 shell）启动时

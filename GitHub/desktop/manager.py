@@ -35,7 +35,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import autoport, autostart, paths
+from . import autoport, autostart, credentials, paths
 from .icon import bolt_icon
 from .version import VERSION
 
@@ -753,7 +753,23 @@ class Manager:
         log(f"兜底注入返回: {'有结果' if got is not None else '超时（不影响主界面）'}")
 
     # ------------------------------------------------------------ 托盘
+    def _cred_ok(self) -> bool:
+        """凭据是否配好。按 .env 的 mtime 缓存，别每 3 秒读一次盘。"""
+        try:
+            mtime = credentials.env_path().stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        if getattr(self, "_cred_cache", None) != mtime:
+            self._cred_cache = mtime
+            try:
+                self._cred_value = credentials.is_configured()
+            except Exception:  # noqa: BLE001
+                self._cred_value = False
+        return bool(getattr(self, "_cred_value", False))
+
     def _tray_title(self, _item=None):
+        if not self._cred_ok():
+            return "未配置设备凭据 · 点「设置设备凭据」"
         if not self.service.alive():
             return "采集服务：已停止"
         if self._state["connected"]:
@@ -778,7 +794,9 @@ class Manager:
                 return
             self.refresh()
             self.tray_icon.icon = bolt_icon(self._state["total"], self._state["connected"])
-            if self._state["connected"]:
+            if not self._cred_ok():
+                self.tray_icon.title = "CUKTECH 未配置凭据"
+            elif self._state["connected"]:
                 self.tray_icon.title = f"CUKTECH  {self._state['total']:.1f} W"
             else:
                 self.tray_icon.title = "CUKTECH 未连接"
@@ -799,6 +817,7 @@ class Manager:
                 Menu.SEPARATOR,
                 MenuItem(self._console_text, lambda: self.toggle_console(), default=True),
                 MenuItem("运行管理…", lambda: self.show_management()),
+                MenuItem("设置设备凭据…", lambda: self.open_credentials()),
                 MenuItem(self._widget_text, lambda: self.set_widget(not self.widget.alive())),
                 Menu.SEPARATOR,
                 MenuItem(self._service_text, lambda: self.set_service(not self.service.alive())),
@@ -821,6 +840,66 @@ class Manager:
         self.show_console()
         self.open_overlay()
         self.sync_tray()
+
+    # --- 设备凭据
+    def open_credentials(self) -> None:
+        """拉起凭据向导（独立进程）。
+
+        不在本进程开窗口：主线程被 webview.start() 占着，向导是一次性对话框，
+        跑完就退，没必要混进当前的窗口管理。
+        """
+        try:
+            proc = subprocess.Popen(
+                paths.launch_command("--collect"),
+                cwd=str(paths.resource_dir()),
+            )
+        except OSError as exc:
+            log(f"凭据向导启动失败 {exc!r}")
+            return
+        log("已拉起凭据向导")
+        threading.Thread(target=self._after_wizard, args=(proc,), daemon=True).start()
+
+    def _after_wizard(self, proc) -> None:
+        """向导关掉之后：配置变了就把采集服务重启一次，让它重读凭据。"""
+        try:
+            proc.wait()
+        except Exception:  # noqa: BLE001
+            return
+        if not credentials.is_configured():
+            log("凭据向导已关闭，凭据仍未配置")
+            try:
+                self.sync_tray()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        log("凭据已更新，重启采集服务以重新连接")
+        try:
+            self.service.stop()
+            time.sleep(0.5)
+            self.service.start()
+            self._console_state = "idle"
+        except Exception as exc:  # noqa: BLE001
+            log(f"重启采集服务失败 {exc!r}")
+        try:
+            self.sync_tray()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _ensure_credentials(self) -> None:
+        """启动时凭据缺失就先把向导弹出来。
+
+        --silent（开机自启）不弹：开机时打断用户很烦，托盘里有入口就够了。
+        """
+        if self.silent or credentials.is_configured():
+            return
+        log("设备凭据未配置，先打开导入向导")
+        try:
+            subprocess.run(
+                paths.launch_command("--collect"),
+                cwd=str(paths.resource_dir()),
+            )
+        except OSError as exc:
+            log(f"凭据向导启动失败 {exc!r}")
 
     @staticmethod
     def _open_dir(path) -> None:
@@ -868,6 +947,9 @@ class Manager:
 
         setup_webview_log()
         setup_remote_debugging(webview)
+        # 凭据缺失就先让用户填：否则采集服务起来只会一直连不上，
+        # 用户看到的是「软件坏了」，而不是「还差一步配置」。
+        self._ensure_credentials()
         conf = load_conf()
         self.service.start()
         # 自动开端口：只在「进程启动 + 落在所设时间窗内」时做一次（规则见 autoport.py）。

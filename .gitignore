@@ -1,30 +1,42 @@
 # ============================================================
 #  仓库根 .gitignore
 #  只提交源码与文档；凭据、运行时数据、构建产物一律排除
+#
+#  v1.5.0：源码目录 app\ 已改名 GitHub\，下面这些路径必须跟着改。
+#  原来整份文件都指向 /app/...，改名之后全部失效 —— 表现是
+#  GitHub\dist、GitHub\data、GitHub\logs 都变成「可提交」状态。
 # ============================================================
 
 # ---- 安装包（体积大，发 GitHub Releases）----
 /*.exe
 /*.msi
 /*.zip
+/安装包/**/*.exe
+/分发/*.exe
+/分发/tools/*.exe
 
 # ---- 构建产物 ----
-/app/dist/
-/app/build/
-/app/_backup_*/
-/app/*.spec.bak
+/GitHub/dist/
+/GitHub/build/
+/GitHub/_backup_*/
+/GitHub/*.spec.bak
+/GitHub/*.bak
+/GitHub/*.bak-*
+/GitHub/*.bak_*
 
 # ---- 运行时数据（历史库、WebView2 缓存、自动开关状态）----
-/app/data/
-/app/logs/
+/GitHub/data/
+/GitHub/logs/
 
 # ---- 设备凭据：绝不提交 ----
-/app/.env
-/app/.env.local
-/app/secrets.json
+/GitHub/.env
+/GitHub/.env.local
+/secrets.json
 
 # ---- 第三方二进制工具 ----
 /tools/*.exe
+# 取码脚本的原始输出留档（含真实三码，绝不提交）
+/tools/out/
 
 # ---- Python ----
 __pycache__/

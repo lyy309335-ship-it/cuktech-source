@@ -1,11 +1,12 @@
 """CUKTECH 桌面版 · 统一入口。
 
-同一个 exe 承担三个角色，用命令行参数区分，安装包里只有一个可执行文件：
+同一个 exe 承担四个角色，用命令行参数区分，安装包里只有一个可执行文件：
 
     CUKTECH.exe                管理器：托盘 + 内部控制台窗口 + 运行管理窗口 + 监管子进程（单实例）
     CUKTECH.exe --silent       同上，但启动时不弹窗口（开机自启用这个）
     CUKTECH.exe --service      采集服务：BLE 后台 + 本地 Web API（127.0.0.1:8080）
     CUKTECH.exe --widget       桌面卡片：贴在桌面上的那块小窗
+    CUKTECH.exe --collect      凭据导入向导：填 MAC / TOKEN / BLE KEY，跑完即退
 
 为什么不合成一个进程：采集走 asyncio + BLE 长连接，界面走 WinForms 消息循环，
 放一起任何一边卡住都会拖死另一边；分开后卡片崩了采集还在，采集崩了界面还在。
@@ -86,6 +87,15 @@ def run_widget() -> None:
     widget_app.main()
 
 
+def run_collect() -> None:
+    """凭据导入向导：独立进程跑一个 WebView2 窗口，存完就退。"""
+    from desktop import credential_wizard
+
+    code = credential_wizard.run()
+    if code:
+        sys.exit(code)
+
+
 def _release_single_instance() -> None:
     """提前放掉单实例互斥量。
 
@@ -143,6 +153,8 @@ def main() -> None:
         run_service()
     elif "--widget" in argv:
         run_widget()
+    elif "--collect" in argv:
+        run_collect()
     else:
         run_manager(silent="--silent" in argv)
 

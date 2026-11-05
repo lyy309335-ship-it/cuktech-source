@@ -63,6 +63,9 @@ body {
   --pulse-speed: 2.2s;
   --flow-bright: 0.5;
   --tail-alpha: 0.35;
+  /* 轨道宽度唯一来源：轨道自身和光点/尾迹的位移距离都取它，
+     动画里用 calc(var(--track-w) - Npx) 就能在任何宽度下跑到头 */
+  --track-w: 230px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -77,42 +80,71 @@ body {
 
 .flow-track {
   position: relative;
-  width: 230px;
+  width: var(--track-w);
   height: 14px;
   border-radius: 999px;
   border: 1px solid var(--card-border);
   background: linear-gradient(90deg, rgba(59,130,246,0.08), rgba(34,197,94,0.08));
   overflow: hidden;
+  /* 把轨道独立成一层：里面的条纹/光点移动时不必让整页重排 */
+  contain: paint;
 }
 
-.flow-fill {
+/* 进度不再用 width 过渡 —— 实测那是掉帧的真凶：
+   width 每帧都会触发 layout + 重绘（4 个口 + 头部 = 175 次/秒），
+   平均吃掉渲染进程 30% 的主线程。改成「条纹铺满整条轨道 + 一块遮罩
+   用 transform 平移」，两者都走合成器，主线程 0 布局。 */
+.flow-mask {
   position: absolute;
-  left: 0;
   top: 0;
+  left: 0;
+  width: 100%;
   height: 100%;
-  width: 0%;
-  border-radius: 999px;
+  background: var(--card);
+  /* 直接写 translateX(n%)，不要写成 calc(var(--fill) * 100%)：
+     带 var() 的 transform 在过渡时 Chromium 会退回主线程、逐帧重算样式
+     （实测 130 次/秒），纯百分比的 translateX 才能交给合成器。 */
+  transform: translateX(0);
+  transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+  pointer-events: none;
+}
+
+/* 条纹层：铺满轨道，用 transform 跑循环（合成器线程，不触发重绘/重排）。
+   右边多留 80px，向左平移时右侧不会露出空白。
+   一个周期 = 16px，位移取 32px（整数倍）——这样循环回到起点时图案
+   完全对齐，看不出"跳一下"。原来的写法是 40px / 16px = 2.5 个周期，
+   每轮结束错位半格，看着就是一顿一顿。 */
+.flow-stripes {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: -80px;
   background:
     repeating-linear-gradient(
       90deg,
-      rgba(59,130,246,0.08) 0px,
-      rgba(59,130,246,0.08) 8px,
+      rgba(59,130,246,0.10) 0px,
+      rgba(59,130,246,0.10) 8px,
       rgba(34,197,94,0.55) 8px,
       rgba(34,197,94,0.55) 16px
     );
-  filter: brightness(var(--flow-bright));
+  opacity: var(--flow-bright);
   animation: flowStripe var(--flow-speed) linear infinite;
-  transition: width 0.5s ease, filter 0.4s ease;
+  transform: translate3d(0, 0, 0);
 }
+
+.energy-flow.active .flow-stripes { will-change: transform; }
 
 .flow-pulse {
   position: absolute;
   top: 50%;
-  left: -14px;
+  left: 0;
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  transform: translateY(-50%);
+  /* 原来动的是 left（每帧重排），改成 transform（纯合成） */
+  transform: translate3d(-14px, -50%, 0);
   background: radial-gradient(circle, rgba(255,255,255,0.95) 0%, rgba(34,197,94,0.9) 45%, rgba(59,130,246,0.15) 100%);
   box-shadow: 0 0 12px rgba(34,197,94,0.7);
   opacity: 0;
@@ -121,27 +153,31 @@ body {
 .energy-flow.active .flow-pulse {
   opacity: 1;
   animation: flowPulse var(--pulse-speed) linear infinite;
+  will-change: transform, opacity;
 }
 
 .flow-tail {
   position: absolute;
   top: 50%;
-  left: -20px;
+  left: 0;
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  transform: translateY(-50%);
+  transform: translate3d(-22px, -50%, 0) scale(0.8);
   opacity: 0;
-  background: radial-gradient(circle, rgba(147, 197, 253, 0.95) 0%, rgba(59,130,246,0.55) 60%, rgba(34,197,94,0) 100%);
-  filter: blur(0.4px);
-  box-shadow: 0 0 9px rgba(59,130,246,0.6);
+  background: radial-gradient(circle,
+    rgba(147, 197, 253, 0.95) 0%,
+    rgba(59, 130, 246, 0.55) 42%,
+    rgba(59, 130, 246, 0.18) 68%,
+    rgba(34, 197, 94, 0) 100%);
   pointer-events: none;
 }
 
+/* 不再用 filter: blur() 做柔边 —— 带滤镜的元素在移动时要整层重新栅格化，
+   改成渐变自己带衰减，栅格化一次就一直复用。 */
 .flow-tail.t2 {
   width: 8px;
   height: 8px;
-  filter: blur(0.8px);
 }
 
 .energy-flow.boost.active .flow-tail {
@@ -165,23 +201,24 @@ body {
   color: var(--text-dim);
 }
 
+/* 位移量必须是条纹周期（16px）的整数倍，否则每轮回到起点会错位半格 */
 @keyframes flowStripe {
-  from { background-position: 0 0; }
-  to { background-position: 40px 0; }
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-32px, 0, 0); }
 }
 
 @keyframes flowPulse {
-  0% { left: -14px; opacity: 0.0; }
-  8% { opacity: 1; }
-  92% { opacity: 1; }
-  100% { left: calc(100% - 2px); opacity: 0.0; }
+  0%   { transform: translate3d(-14px, -50%, 0); opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { transform: translate3d(calc(var(--track-w) - 2px), -50%, 0); opacity: 0; }
 }
 
 @keyframes flowTail {
-  0% { left: -22px; opacity: 0.0; transform: translateY(-50%) scale(0.8); }
-  12% { opacity: var(--tail-alpha); }
-  62% { opacity: calc(var(--tail-alpha) * 0.75); }
-  100% { left: calc(100% - 8px); opacity: 0.0; transform: translateY(-50%) scale(0.45); }
+  0%   { transform: translate3d(-22px, -50%, 0) scale(0.8); opacity: 0; }
+  12%  { opacity: var(--tail-alpha); }
+  62%  { opacity: calc(var(--tail-alpha) * 0.75); }
+  100% { transform: translate3d(calc(var(--track-w) - 6px), -50%, 0) scale(0.45); opacity: 0; }
 }
 
 .header-right {
@@ -318,7 +355,8 @@ body {
 
 .history-toolbar {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr auto;
+  /* v1.4.2：指标下拉已去掉（只剩功率），列数从 5 变 4 */
+  grid-template-columns: 1fr 1fr 1fr auto;
   gap: 10px;
   margin-bottom: 12px;
 }
@@ -448,9 +486,14 @@ body {
 }
 .power-fill {
   height: 100%;
-  width: 0;
-  transition: width 0.5s ease, background 0.5s ease;
+  width: 100%;
+  /* 同样是 width → transform：宽度每帧变化会带 layout，scaleX 不会。
+     3px 高的纯色条，横向拉伸对圆角的影响看不出来。 */
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), background 0.5s ease;
   border-radius: 0 2px 2px 0;
+  will-change: transform;
 }
 
 
@@ -689,7 +732,8 @@ body {
     gap: 8px;
   }
   .header h1 { font-size: 15px; }
-  .flow-track { width: 160px; height: 12px; }
+  .energy-flow { --track-w: 160px; }
+  .flow-track { height: 12px; }
   .energy-flow .power-val { font-size: 16px; min-width: 50px; }
 
   .header-right { width: 100%; justify-content: space-between; }
@@ -760,24 +804,27 @@ body {
 }
 
 /* ============================================================
-   v1.3.8 常驻动画受控
+   流光动画的启停策略（v1.4.2 重做）
    ------------------------------------------------------------
-   下面这四组动画原来都是 infinite，和数据变没变无关，一直以 60fps
-   在合成层上滚动 —— 这是渲染进程 3.2% + GPU 1.8% 的主要来源。
-   现在默认暂停（静态画面一模一样，只是不滚），只在数值真的变了
-   之后短暂恢复 1.2 秒（见 kickAnim()）。窗口隐藏时整页暂停。
+   v1.3.8 为了省 CPU，把这几组动画改成「数据一变才动 1.2 秒」，
+   结果是充电时流光不停地在 冻结 → 恢复 之间切换，看起来就是卡顿；
+   再叠加当时动的是 background-position / left（每帧重绘+重排），
+   掉帧就明显了。
+
+   现在两条一起改：
+   1) 动画全部走 transform / opacity（合成器线程），主线程零负担；
+   2) 只在真正该动的时候动 —— 有功率输出时连续跑，功率为 0 时暂停
+      （此时进度条宽度本来就是 0，静止画面和暂停完全一致）。
+   窗口隐藏（收进托盘 / 锁屏）仍然全页暂停，这条是省电兜底。
    ============================================================ */
-html.viz-idle .flow-fill,
-html.viz-idle .energy-flow.active .flow-pulse,
-html.viz-idle .energy-flow.boost.active .flow-tail,
-html.viz-idle .port-card.power-high {
+.energy-flow.zero .flow-stripes,
+.energy-flow.zero .flow-pulse,
+.energy-flow.zero .flow-tail {
   animation-play-state: paused;
 }
 
-/* 窗口隐藏（收进托盘 / 锁屏）时，不只是上面四组，全页动画一律停。
-   原来 viz-paused 只是个 JS 标志，没有样式兜底 —— 一旦有别的地方让
-   viz-idle 先被摘掉（或将来新增动画忘了加进上面那一组），隐藏期间照样
-   按 60fps 跑。这条 !important 规则是那道保险。 */
+/* 窗口隐藏（收进托盘 / 锁屏）时，全页动画一律停。
+   viz-paused 只由 __ck.setPaused / visibilitychange 触发。 */
 html.viz-paused *,
 html.viz-paused *::before,
 html.viz-paused *::after {
@@ -787,7 +834,7 @@ html.viz-paused *::after {
 /* 注意：这里刻意不加 `@media (prefers-reduced-motion: reduce)` 去 animation:none。
    实测本机 WebView2 报的就是 reduce（Windows「显示动画」相关设置会影响它），
    加了这条等于把流光动画永久关掉 —— 充电时那道流动光效直接不动了，
-   属于用户没要求的视觉回退。控制动画只走上面 viz-idle / viz-paused 两条通道。 */
+   属于用户没要求的视觉回退。控制动画只走上面 zero / viz-paused 两条通道。 */
 </style>
 </head>
 <body>
@@ -798,8 +845,9 @@ html.viz-paused *::after {
     <h1>CUKTECH 充电器控制面板</h1>
     <div class="energy-flow zero" id="totalPowerWrap">
       <span class="energy-icon">⚡</span>
-      <div class="flow-track">
-        <div class="flow-fill" id="energyFlowFill"></div>
+      <div class="flow-track" id="flowTrack">
+        <div class="flow-stripes"></div>
+        <div class="flow-mask" id="energyFlowMask"></div>
         <div class="flow-pulse"></div>
         <div class="flow-tail t1"></div>
         <div class="flow-tail t2"></div>
@@ -1007,14 +1055,9 @@ html.viz-paused *::after {
           <option value="a">A</option>
           <option value="total">总功率</option>
         </select>
-        <select id="historyMetric">
-          <option value="power">功率 (W)</option>
-          <option value="voltage">电压 (V)</option>
-          <option value="current">电流 (A)</option>
-        </select>
         <select id="historyGranularity">
-          <option value="second">按秒</option>
           <option value="minute">按分钟</option>
+          <option value="second">按秒</option>
           <option value="hour">按小时</option>
           <option value="day">按天</option>
           <option value="month">按月</option>
@@ -1060,22 +1103,12 @@ let historyChart = null;
 // ---- v1.3.8 渲染节流状态 ----
 // dirtyPorts：本帧内有哪些端口收到了新消息
 // rafPending：已经排了一帧，别重复排
-// animTimer：环境动画的"短暂唤醒"计时器
 const dirtyPorts = new Set();
 let rafPending = false;
-let animTimer = 0;
 
-// 页面一进来就是静止状态，只有数据变化才短暂动一下
-document.documentElement.classList.add('viz-idle');
-
-// 数据真的变了才让流光跑 1.2 秒；隐藏时一律不动
-function kickAnim() {
-  const root = document.documentElement;
-  if (root.classList.contains('viz-paused')) return;
-  root.classList.remove('viz-idle');
-  clearTimeout(animTimer);
-  animTimer = setTimeout(() => root.classList.add('viz-idle'), 1200);
-}
+// v1.4.2：不再用 viz-idle 让动画「动 1.2 秒停一会儿」——
+// 那种反复启停正是流光看着卡的直接原因。现在有功率就一直跑，
+// 功率归零由 .energy-flow.zero 暂停（见 <style> 末尾的说明）。
 
 // 一帧最多重绘一次：BLE 每秒可能推好几次，原来每次都整屏重排
 function scheduleRender() {
@@ -1095,7 +1128,6 @@ function scheduleRender() {
     dirtyPorts.clear();
     renderPortsDisplay();
     updateTotalPower();
-    kickAnim();
   });
 }
 
@@ -1356,7 +1388,7 @@ function updatePowerBar(port, power) {
   const lastPct = Number(fill.dataset.pct);
   if (!Number.isFinite(lastPct) || Math.abs(lastPct - pct) >= 0.5) {
     fill.dataset.pct = String(pct);
-    fill.style.width = pct + '%';
+    fill.style.transform = `scaleX(${(pct / 100).toFixed(4)})`;
   }
   // Color: green <35%, amber <75%, red >=75%
   const ratio = cfg.sceneMax > 0 ? (safePower / cfg.sceneMax) : 0;
@@ -1390,26 +1422,35 @@ function updateTotalPower() {
   }
   const wrap = document.getElementById('totalPowerWrap');
   const el = document.getElementById('totalPower');
-  const flowFill = document.getElementById('energyFlowFill');
+  const flowMask = document.getElementById('energyFlowMask');
   const totalText = total > 0 ? `${total.toFixed(1)}W` : '0W';
 
   const cfg = POWER_LIMITS.total;
   const safeTotal = Math.max(0, Math.min(total, cfg.hardMax));
   const level = Math.max(0, Math.min(safeTotal / cfg.sceneMax, 1));
   const flowPct = total > 0 ? Math.max(4, level * 100) : 0;
+  // 速度只按 1/4 档变化：改 animation-duration 会让动画进度按比例跳一下，
+  // 每 0.1W 抖一次就等于每帧都在抖。分档后只在功率跨过 25% 时换一次速度。
+  const bucket = Math.round(level * 4) / 4;
 
   // v1.3.8：整块总功率区域按一个 key 做脏检查。
   // 原来每条消息都要写 4 个 CSS 变量 + 宽度 + 3 个 class，等于逼整棵子树重算样式。
-  const key = totalText + '|' + flowPct.toFixed(1) + '|' + level.toFixed(3)
+  const key = totalText + '|' + flowPct.toFixed(1) + '|' + bucket
     + '|' + (safeTotal > cfg.sceneMax);
   if (wrap && wrap.dataset.lastKey === key) return;
   if (wrap) wrap.dataset.lastKey = key;
 
   if (el) el.textContent = totalText;
 
-  if (flowFill) {
-    flowFill.style.width = `${flowPct.toFixed(1)}%`;
-    flowFill.style.boxShadow = safeTotal > cfg.sceneMax ? '0 0 16px rgba(248, 113, 113, 0.55)' : 'none';
+  if (flowMask) {
+    // 遮罩平移用的比例（0~100%），交给 CSS 的 transform 过渡去做动画
+    flowMask.style.transform = `translateX(${flowPct.toFixed(2)}%)`;
+    const track = document.getElementById('flowTrack');
+    const glow = safeTotal > cfg.sceneMax ? '0 0 16px rgba(248, 113, 113, 0.55)' : 'none';
+    if (track && track.dataset.glow !== glow) {
+      track.dataset.glow = glow;
+      track.style.boxShadow = glow;
+    }
   }
 
   if (!wrap) return;
@@ -1417,31 +1458,50 @@ function updateTotalPower() {
   wrap.classList.toggle('active', total > 0);
   wrap.classList.toggle('boost', total >= 55);
 
-  const flowSpeed = (2.4 - level * 1.8).toFixed(2);
-  const pulseSpeed = (2.6 - level * 2.0).toFixed(2);
-  const brightness = (0.55 + level * 0.9).toFixed(2);
-  const tailAlpha = (0.2 + level * 0.6).toFixed(2);
-
-  wrap.style.setProperty('--flow-speed', `${Math.max(0.45, Number(flowSpeed))}s`);
-  wrap.style.setProperty('--pulse-speed', `${Math.max(0.35, Number(pulseSpeed))}s`);
-  wrap.style.setProperty('--flow-bright', brightness);
-  wrap.style.setProperty('--tail-alpha', tailAlpha);
+  // 只有跨档才重写这几个变量，避免每秒重算动画时间
+  if (wrap.dataset.bucket !== String(bucket)) {
+    wrap.dataset.bucket = String(bucket);
+    const flowSpeed = Math.max(0.45, 2.4 - bucket * 1.8);
+    const pulseSpeed = Math.max(0.35, 2.6 - bucket * 2.0);
+    wrap.style.setProperty('--flow-speed', `${flowSpeed.toFixed(2)}s`);
+    wrap.style.setProperty('--pulse-speed', `${pulseSpeed.toFixed(2)}s`);
+    wrap.style.setProperty('--flow-bright', (0.55 + bucket * 0.9).toFixed(2));
+    wrap.style.setProperty('--tail-alpha', (0.2 + bucket * 0.6).toFixed(2));
+  }
 }
 
 // ============================================================
-// History charts
+// History charts（v1.4.2）
+// ------------------------------------------------------------
+// 变化点：
+// 1) 默认就是「今天 + 按分钟」——进去不用点就能看到当天曲线；
+// 2) 同一张图里叠两条线：所选端口的「功率」和全场「总功率」，
+//    两者同量纲（W），看「这口占了多少」一眼就够；
+// 3) 电压/电流两个指标已下线（图里只需要功率）。
 // ============================================================
+function localDateStr(d) {
+  // 不能用 toISOString()，那是 UTC —— 北京时间 0~8 点会退到昨天
+  const t = d || new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`;
+}
+
+function localMinuteKey(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 function initHistoryPanel() {
   const dateEl = document.getElementById('historyDate');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateStr();
   dateEl.innerHTML = `<option value="${today}">${today}</option>`;
 
+  // 默认按分钟
+  document.getElementById('historyGranularity').value = 'minute';
+
   document.getElementById('historyPort').addEventListener('change', () => loadHistoryData());
-  document.getElementById('historyMetric').addEventListener('change', () => loadHistoryData());
   document.getElementById('historyGranularity').addEventListener('change', () => loadHistoryData());
-  dateEl.addEventListener('change', () => {
-    loadHistoryData();
-  });
+  dateEl.addEventListener('change', () => loadHistoryData());
 
   loadHistoryDates().then(() => loadHistoryData());
 }
@@ -1456,89 +1516,191 @@ async function loadHistoryDates() {
   if (prev && data.dates.includes(prev)) dateEl.value = prev;
 }
 
+function historyBucketLabel(ts, granularity) {
+  const s = String(ts || '');
+  if (granularity === 'second') return s.slice(11, 19);
+  if (granularity === 'minute') return s.slice(11, 16);
+  if (granularity === 'hour') return `${s.slice(11, 13)}:00`;
+  return s;
+}
+
+// 分钟粒度下把时间轴补成连续的一分钟一格。
+// 后端只在「数值变化」时才写一条，直接按记录画点会把空白分钟压掉，
+// 曲线就会挤在一起、横向比例失真。
+function buildHistoryAxis(rowsList, granularity) {
+  const set = new Set();
+  rowsList.forEach(rows => rows.forEach(r => set.add(String(r.ts || ''))));
+  const keys = [...set].filter(Boolean).sort();
+  if (!keys.length) return [];
+  if (granularity !== 'minute' || keys.length < 2) return keys;
+
+  const axis = [];
+  const endKey = keys[keys.length - 1];
+  let t = new Date(keys[0]);
+  // 上限兜底：一天最多 1440 格，超过就别硬撑（异常数据不该卡死页面）
+  for (let i = 0; i < 3000; i++) {
+    const key = localMinuteKey(t);
+    axis.push(key);
+    if (key >= endKey) break;
+    t = new Date(t.getTime() + 60000);
+  }
+  return axis;
+}
+
+// 缺口沿用上一条读数：没记录 = 这一分钟没变化，不是 0。
+// 但只续一小段（maxGap 格），再长就当「没采到数据」断开 ——
+// 否则一次断电十几个小时，曲线会被拉成一条假的水平线。
+function fillHistorySeries(rows, axis, maxGap) {
+  const byTs = new Map();
+  rows.forEach(r => byTs.set(String(r.ts || ''), Number(r.power || 0)));
+  const out = [];
+  let last = null;
+  let lastIdx = -1;
+  for (let i = 0; i < axis.length; i++) {
+    const ts = axis[i];
+    if (byTs.has(ts)) {
+      last = byTs.get(ts);
+      lastIdx = i;
+      out.push(last);
+    } else {
+      out.push(last !== null && i - lastIdx <= maxGap ? last : null);
+    }
+  }
+  return out;
+}
+
+// 时间粒度 → 允许连续沿用多少格
+function historyMaxGap(granularity) {
+  if (granularity === 'second') return 120;
+  if (granularity === 'minute') return 10;
+  if (granularity === 'hour') return 3;
+  return Infinity;
+}
+
 async function loadHistoryData() {
   const date = document.getElementById('historyDate').value;
   const port = document.getElementById('historyPort').value;
-  const metric = document.getElementById('historyMetric').value;
   const granularity = document.getElementById('historyGranularity').value;
-  if (!port || !metric || !granularity) return;
+  if (!port || !granularity) return;
 
-  const data = await apiCall('GET', `/api/history?date=${encodeURIComponent(date || '')}&port=${encodeURIComponent(port)}&granularity=${encodeURIComponent(granularity)}`);
-  if (!data.ok) return;
+  const qs = extra => `/api/history?date=${encodeURIComponent(date || '')}`
+    + `&port=${encodeURIComponent(extra)}&granularity=${encodeURIComponent(granularity)}`;
 
-  const records = Array.isArray(data.records) ? data.records : [];
-  const labels = records.map(r => {
-    const ts = String(r.ts || '');
-    if (granularity === 'second') return ts.slice(11, 19);
-    if (granularity === 'minute') return ts.slice(11, 16);
-    if (granularity === 'hour') return `${ts.slice(11, 13)}:00`;
-    if (granularity === 'day') return ts;
-    if (granularity === 'month') return ts;
-    if (granularity === 'year') return ts;
-    return ts;
-  });
-  const metricName = {
-    power: '功率 (W)',
-    voltage: '电压 (V)',
-    current: '电流 (A)',
-  };
-  const granularityName = {
-    second: '秒',
-    minute: '分钟',
-    hour: '小时',
-    day: '天',
-    month: '月',
-    year: '年',
-  };
-  const metricColor = {
-    power: '#22c55e',
-    voltage: '#3b82f6',
-    current: '#f59e0b',
-  };
+  // 总功率和端口功率并发取，两个请求互不依赖
+  const wantTotal = port !== 'total';
+  const [portRes, totalRes] = await Promise.all([
+    apiCall('GET', qs(port)),
+    wantTotal ? apiCall('GET', qs('total')) : Promise.resolve(null),
+  ]);
+  if (!portRes || !portRes.ok) return;
 
-  const isTotal = port === 'total';
-  const effectiveMetric = isTotal && metric !== 'power' ? 'power' : metric;
-  if (isTotal && metric !== 'power') {
-    document.getElementById('historyMetric').value = 'power';
+  const portRows = Array.isArray(portRes.records) ? portRes.records : [];
+  const totalRows = totalRes && totalRes.ok && Array.isArray(totalRes.records) ? totalRes.records : [];
+  if (!portRows.length && !totalRows.length) {
+    renderHistoryChart([], [], '功率 (W) · 暂无数据');
+    return;
   }
 
-  const values = records.map(r => Number(r[effectiveMetric] || 0));
-  document.getElementById('historyChartTitle').textContent = `${metricName[effectiveMetric]} · ${port.toUpperCase()} · 按${granularityName[granularity]}${granularity === 'second' || granularity === 'minute' || granularity === 'hour' ? ` · ${date}` : ''}`;
-  renderSingleHistoryChart(labels, values, metricColor[effectiveMetric], metricName[effectiveMetric]);
+  const axis = buildHistoryAxis(wantTotal ? [portRows, totalRows] : [portRows], granularity);
+  const labels = axis.map(ts => historyBucketLabel(ts, granularity));
+
+  const granularityName = {
+    second: '秒', minute: '分钟', hour: '小时',
+    day: '天', month: '月', year: '年',
+  }[granularity] || '分钟';
+  const withDate = granularity === 'second' || granularity === 'minute' || granularity === 'hour';
+
+  const datasets = [];
+  const maxGap = historyMaxGap(granularity);
+  if (port !== 'total') {
+    // 所选端口的功率（绿）
+    datasets.push({
+      label: `${port.toUpperCase()} 功率 (W)`,
+      data: fillHistorySeries(portRows, axis, maxGap),
+      borderColor: '#22c55e',
+    });
+    // 全场总功率（蓝），作为对照基线
+    datasets.push({
+      label: '总功率 (W)',
+      data: fillHistorySeries(totalRows, axis, maxGap),
+      borderColor: '#60a5fa',
+    });
+  } else {
+    // 选「总功率」时就只画这一条，不再叠一条重复的
+    datasets.push({
+      label: '总功率 (W)',
+      data: fillHistorySeries(portRows, axis, maxGap),
+      borderColor: '#22c55e',
+    });
+  }
+
+  const scope = port === 'total' ? '总功率' : `${port.toUpperCase()} vs 总功率`;
+  const title = `功率 (W) · ${scope} · 按${granularityName}${withDate && date ? ` · ${date}` : ''}`;
+  renderHistoryChart(labels, datasets, title);
 }
 
-function renderSingleHistoryChart(labels, values, color, label) {
+function renderHistoryChart(labels, datasets, title) {
   const el = document.getElementById('historyChart');
   if (!el || !window.Chart) return;
 
-  const maxV = values.length ? Math.max(...values) : 0;
+  const titleEl = document.getElementById('historyChartTitle');
+  if (titleEl) titleEl.textContent = title;
+
+  let maxV = 0;
+  datasets.forEach(d => d.data.forEach(v => {
+    if (typeof v === 'number' && v > maxV) maxV = v;
+  }));
   const suggestedMax = maxV > 0 ? Number((maxV * 1.15).toFixed(2)) : 1;
+
+  const styled = datasets.map(d => ({
+    ...d,
+    borderWidth: 2,
+    tension: 0.18,
+    pointRadius: 0,
+    pointHitRadius: 10,
+    pointHoverRadius: 3,
+    fill: false,
+    // 断点就是断点：长缺口不应该被一条直线"补"过去
+    spanGaps: false,
+    borderJoinStyle: 'round',
+  }));
 
   if (!historyChart) {
     historyChart = new Chart(el.getContext('2d'), {
       type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label,
-          data: values,
-          borderColor: color,
-          borderWidth: 2,
-          tension: 0.18,
-          pointRadius: 0,
-          pointHitRadius: 8,
-          fill: false,
-        }],
-      },
+      data: { labels, datasets: styled },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
-        layout: { padding: { bottom: 8 } },
+        layout: { padding: { bottom: 8, top: 2 } },
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { display: false },
-          tooltip: { enabled: true },
+          legend: {
+            display: datasets.length > 1,
+            position: 'top',
+            align: 'end',
+            labels: {
+              color: '#94a3b8',
+              usePointStyle: true,
+              pointStyle: 'line',
+              boxWidth: 18,
+              boxHeight: 2,
+              padding: 14,
+              font: { size: 11 },
+            },
+          },
+          tooltip: {
+            enabled: true,
+            callbacks: {
+              label: ctx => {
+                const v = ctx.parsed.y;
+                return v === null || v === undefined
+                  ? `${ctx.dataset.label}: —`
+                  : `${ctx.dataset.label}: ${Number(v).toFixed(1)}W`;
+              },
+            },
+          },
         },
         scales: {
           x: {
@@ -1571,9 +1733,8 @@ function renderSingleHistoryChart(labels, values, color, label) {
   }
 
   historyChart.data.labels = labels;
-  historyChart.data.datasets[0].label = label;
-  historyChart.data.datasets[0].data = values;
-  historyChart.data.datasets[0].borderColor = color;
+  historyChart.data.datasets = styled;
+  historyChart.options.plugins.legend.display = datasets.length > 1;
   historyChart.options.scales.y.suggestedMax = suggestedMax;
   historyChart.update('none');
 }
@@ -1715,10 +1876,6 @@ window.__ck = {
       dirtyPorts.add('c3'); dirtyPorts.add('a');
       renderPortsDisplay();
       updateTotalPower();
-      kickAnim();
-    } else {
-      clearTimeout(animTimer);
-      root.classList.add('viz-idle');
     }
   }
 };

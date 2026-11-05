@@ -407,6 +407,9 @@ class BLEConnectionManager:
             # 读取所有设置
             await self._refresh_all_settings()
 
+            # 主动读一遍四个口，否则重连后要等设备推一次变化才有读数
+            await self._read_all_ports()
+
             return {
                 "ok": True, "state": "READY",
                 "settings": self._cached_settings,
@@ -490,12 +493,37 @@ class BLEConnectionManager:
 
         await self.broadcast("settings", {"settings": self._cached_settings})
 
+    async def _read_all_ports(self):
+        """主动读一遍四个口的端口数据。
+
+        设备只在数值发生变化时才推送，所以重连后若没人插拔，面板会一直显示为空，
+        直到电流/电压真的变一次。连接成功和手动刷新时各补一次主动 GET。
+        """
+        if not self.ctrl:
+            return
+        async with self._cmd_lock:
+            for piid in (1, 2, 3, 4):
+                try:
+                    result = await self.ctrl.send_miot_command(SIID_CHARGER, piid)
+                except Exception:
+                    continue
+                raw = (result or {}).get("raw")
+                if not raw:
+                    continue
+                try:
+                    self._decode_port_push(piid, bytes(raw))
+                except Exception:
+                    pass
+                await asyncio.sleep(0.1)
+
     def _decode_port_push(self, piid, plaintext):
         """解码端口充电推送数据。
 
-        当前实测规则（基于日志 + 实机读数）：
-        - C1/C2/C3: 电压在 b3（0.1V），电流在 b2（0.1A）
-        - A 口:      电压在 b1（0.05V），电流在 b2（0.1A）
+        实测规则（2026-11-05 四轮抓包复核）：
+        - 四个口统一：b0 = 有无输出，b2 = 电流（0.1A），b3 = 电压（0.1V）
+        - A 口旧规则「电压在 b1（0.05V）」已废止：A 口空载时 b1 在 0x30/0x60/0x70
+          之间跳，会凭空显示 2.4~4.8V（而 b2/b3 恒为 0、电流恒 0A）。
+          现改为统一取 b3，仅在 b3 为 0 且确实有电流时才用 b1 兜底。
         - 活跃判定统一使用电压/电流是否非零
         """
         if len(plaintext) < 12:
@@ -508,9 +536,10 @@ class BLEConnectionManager:
             self._debug_dump_port_candidates(piid, plaintext, b)
 
         current = b[2] / 10.0
-        if piid in (1, 2, 3):
-            voltage = b[3] / 10.0
-        else:
+        voltage = b[3] / 10.0
+        if voltage <= 0 and piid == 4 and current > 0:
+            # A 口兜底：万一这口只把电压放在 b1（0.05V）。空载时 b1 是未初始化值，
+            # 所以必须卡住 current > 0，否则又会变出假的 2.4~4.8V
             voltage = b[1] / 20.0
         active = (voltage > 0) or (current > 0)
 
@@ -786,6 +815,7 @@ async def handle_refresh(request):
         return web.json_response({"ok": False, "error": "设备未连接"})
 
     await mgr._refresh_all_settings()
+    await mgr._read_all_ports()
     return web.json_response({"ok": True, "settings": mgr._cached_settings})
 
 

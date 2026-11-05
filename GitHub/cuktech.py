@@ -23,6 +23,7 @@ import threading
 import time
 from pathlib import Path
 
+from desktop import credentials as _cred
 from desktop import paths as _paths
 from desktop.version import VERSION as APP_VERSION
 
@@ -34,6 +35,21 @@ _LOG_MAX_BYTES = 5 * 1024 * 1024
 # 必须强引用：上游 ble.py 会再包一层 TextIOWrapper 到同一个底层缓冲区上，
 # 我们这层一旦被 GC 回收，close 会把文件句柄一起关掉，后续写入直接 ValueError。
 _LOG_STREAM: io.TextIOWrapper | None = None
+
+
+class _RedactingStream(io.TextIOWrapper):
+    """写日志前把 MAC / TOKEN / BLE KEY 打码。
+
+    上游 ble.py 在认证失败时会把整帧十六进制打出来，那些内容里就含 token；
+    日志是要发给别人排障的，不能带着设备凭据散出去。
+    """
+
+    def write(self, text: str) -> int:  # type: ignore[override]
+        try:
+            text = _cred.redact(text)
+        except Exception:  # noqa: BLE001
+            pass
+        return super().write(text)
 
 
 def _ensure_streams(force_log: bool) -> None:
@@ -50,7 +66,7 @@ def _ensure_streams(force_log: bool) -> None:
         LOG_PATH.unlink(missing_ok=True)
 
     handle = open(LOG_PATH, "ab", buffering=0)
-    _LOG_STREAM = io.TextIOWrapper(
+    _LOG_STREAM = _RedactingStream(
         handle, encoding="utf-8", errors="replace", line_buffering=True
     )
     _LOG_STREAM.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} 启动 =====\n")
@@ -305,24 +321,29 @@ def parse_env_file(path: Path) -> dict[str, str]:
 
 
 def load_env() -> Path | None:
-    """在 app/.env 与上一级 .env 中按顺序找，找到就注入 os.environ。"""
-    candidates = [BASE / ".env"]
-    if not _paths.is_frozen():
-        candidates.append(BASE.parent / ".env")
-    for candidate in candidates:
-        if candidate.is_file():
-            for key, value in parse_env_file(candidate).items():
-                os.environ.setdefault(key, value)
-            # 相对路径的数据目录按 app 目录解析，避免受当前工作目录影响；
-            # 打包运行时不写安装目录，统一落到 %LOCALAPPDATA%\CUKTECH\data
-            data_dir = os.environ.get("CUKTECH_DATA_DIR", "").strip()
-            if data_dir and not os.path.isabs(data_dir):
-                if _paths.is_frozen():
-                    os.environ["CUKTECH_DATA_DIR"] = str(_paths.data_dir())
-                else:
-                    os.environ["CUKTECH_DATA_DIR"] = str((BASE / data_dir).resolve())
-            return candidate
-    return None
+    """读配置并注入 os.environ，返回实际生效的那个文件（没有则 None）。
+
+    查找顺序由 desktop.credentials 统一维护：
+        %LOCALAPPDATA%\\CUKTECH\\.env  →  便携目录  →  包内/源码目录的 .env
+
+    之所以不再只看 BASE/".env"：打包后 BASE 是 _internal\\，那份文件藏在安装目录里、
+    而且重装会被 installer 清掉，用户往那儿填等于白填。
+    """
+    from desktop import credentials
+
+    data, used = credentials.read_env()
+    for key, value in data.items():
+        os.environ.setdefault(key, value)
+
+    # 相对路径的数据目录按 app 目录解析，避免受当前工作目录影响；
+    # 打包运行时不写安装目录，统一落到 %LOCALAPPDATA%\CUKTECH\data
+    data_dir = os.environ.get("CUKTECH_DATA_DIR", "").strip()
+    if data_dir and not os.path.isabs(data_dir):
+        if _paths.is_frozen():
+            os.environ["CUKTECH_DATA_DIR"] = str(_paths.data_dir())
+        else:
+            os.environ["CUKTECH_DATA_DIR"] = str((BASE / data_dir).resolve())
+    return used
 
 
 def main() -> None:
@@ -346,7 +367,20 @@ def main() -> None:
     _ensure_streams(want_log)
 
     if env_file is None:
-        print("[warn] 未找到 .env，将以占位 MAC / 空 token 运行", file=sys.stderr)
+        print(
+            "[warn] 未找到设备凭据配置文件，将以占位 MAC / 空 token 运行"
+            "（在软件里点「设置设备凭据」即可配置）",
+            file=sys.stderr,
+        )
+    else:
+        from desktop import credentials
+
+        if not credentials.is_configured():
+            print(
+                f"[warn] {env_file} 里的设备凭据不完整或格式不对，BLE 连接会失败；"
+                "请在软件里「设置设备凭据」重新导入",
+                file=sys.stderr,
+            )
 
     if len(argv) > 1 and argv[1] == "web":
         _run_web()
