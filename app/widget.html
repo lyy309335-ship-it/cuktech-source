@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CUKTECH 桌面组件</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: rgba(17, 19, 24, 0.92);
+    --line: rgba(255, 255, 255, 0.07);
+    --text: #e8eaed;
+    --dim: #7c828d;
+    --dimmer: #4b515b;
+    --live: #5eead4;
+    --live-glow: rgba(94, 234, 212, 0.35);
+  }
+
+  html, body { background: transparent; height: 100%; }
+
+  body {
+    font-family: "Segoe UI Variable Display", "Segoe UI", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+    user-select: none;
+    overflow: hidden;
+  }
+
+  .card {
+    width: 320px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 14px 16px 12px;
+    backdrop-filter: blur(24px) saturate(140%);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* ---------- 头部 ---------- */
+  .head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    cursor: move;
+  }
+
+  .id { display: flex; align-items: center; gap: 7px; padding-top: 2px; }
+
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--dimmer);
+    transition: background .3s, box-shadow .3s;
+  }
+  .dot.on { background: var(--live); box-shadow: 0 0 8px var(--live-glow); }
+  .dot.warn { background: #fbbf24; box-shadow: 0 0 8px rgba(251,191,36,.35); }
+  .dot.err { background: #f87171; }
+
+  .name { font-size: 12px; font-weight: 600; letter-spacing: .2px; color: #c9cdd4; }
+  .sub  { font-size: 10px; color: var(--dim); margin-top: 1px; }
+
+  .total { text-align: right; line-height: 1; }
+  .total .num {
+    font-size: 30px; font-weight: 300; letter-spacing: -1px;
+    font-variant-numeric: tabular-nums;
+    color: #fff;
+  }
+  .total .num.dim { color: var(--dimmer); }
+  .total .unit { font-size: 12px; color: var(--dim); margin-left: 2px; font-weight: 500; }
+
+  /* ---------- 端口 ---------- */
+  .ports { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+
+  .port {
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 7px 6px 6px;
+    background: rgba(255, 255, 255, 0.025);
+    cursor: pointer;
+    transition: background .18s, border-color .18s, transform .12s;
+    position: relative;
+    overflow: hidden;
+  }
+  .port:hover { background: rgba(255, 255, 255, 0.055); border-color: rgba(255,255,255,.13); }
+  .port:active { transform: scale(0.97); }
+  .port.live { border-color: rgba(94, 234, 212, 0.28); background: rgba(94, 234, 212, 0.055); }
+  .port.off  { opacity: .38; }
+
+  .pname { font-size: 9px; font-weight: 700; letter-spacing: .6px; color: var(--dim); }
+  .port.live .pname { color: var(--live); }
+
+  .pw {
+    font-size: 13px; font-weight: 600; margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+  .port.live .pw { color: #fff; }
+  .port:not(.live) .pw { color: var(--dimmer); }
+
+  .va {
+    font-size: 8.5px; color: var(--dim); margin-top: 2px;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+
+  /* ---------- 模式 ---------- */
+  .modes { display: flex; gap: 4px; }
+
+  .mode {
+    flex: 1;
+    font-size: 10px;
+    text-align: center;
+    padding: 5px 0 6px;
+    border-radius: 7px;
+    color: var(--dim);
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all .16s;
+    white-space: nowrap;
+  }
+  .mode:hover { background: rgba(255,255,255,.05); color: #c9cdd4; }
+  .mode.active {
+    background: rgba(94, 234, 212, 0.1);
+    border-color: rgba(94, 234, 212, 0.25);
+    color: var(--live);
+    font-weight: 600;
+  }
+
+  /* ---------- 底部 ---------- */
+  .foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 9.5px;
+    color: var(--dimmer);
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+  }
+  .foot a { color: var(--dim); text-decoration: none; }
+  .foot a:hover { color: var(--live); }
+
+  .foot-right { display: flex; align-items: center; gap: 8px; }
+
+  .closebtn {
+    display: none;
+    width: 15px; height: 15px;
+    align-items: center; justify-content: center;
+    border-radius: 4px; color: #5b616b; font-size: 12px; line-height: 1;
+    cursor: pointer; transition: background .15s, color .15s;
+  }
+  .closebtn:hover { background: rgba(255, 255, 255, .1); color: #e8eaed; }
+
+  /* 固定：钉住当前位置，钉住后不能拖 */
+  .pinbtn {
+    display: none;
+    width: 15px; height: 15px;
+    align-items: center; justify-content: center;
+    border-radius: 4px; color: #5b616b;
+    cursor: pointer; transition: background .15s, color .15s;
+  }
+  .pinbtn:hover { background: rgba(255, 255, 255, .1); color: #e8eaed; }
+  .pinbtn.on { color: var(--live); }
+  .pinbtn svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+
+  /* 作为桌面窗口运行时：卡片铺满窗口，圆角由窗口承担 */
+  body.shell { padding: 0; }
+  body.shell .card { width: 100%; height: 100%; border-radius: 14px; }
+  body.shell .closebtn { display: flex; }
+  body.shell .pinbtn { display: flex; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%) translateY(8px);
+    background: rgba(30, 33, 40, .96); border: 1px solid var(--line);
+    color: #dfe3e8; font-size: 11px; padding: 6px 12px; border-radius: 8px;
+    opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* 仅用于浏览器预览：模拟桌面底色，方便判断真实观感 */
+  body.preview {
+    background:
+      radial-gradient(1200px 600px at 15% 10%, #2b3a55 0%, transparent 60%),
+      radial-gradient(900px 500px at 85% 85%, #3a2b45 0%, transparent 55%),
+      linear-gradient(135deg, #14161b 0%, #1d2027 60%, #171a20 100%);
+    min-height: 100vh;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="head pywebview-drag-region">
+    <div class="id">
+      <span class="dot" id="dot"></span>
+      <div>
+        <div class="name">CUKTECH 10 Ultra</div>
+        <div class="sub" id="sub">连接中…</div>
+      </div>
+    </div>
+    <div class="total">
+      <span class="num dim" id="total">--</span><span class="unit">W</span>
+    </div>
+  </div>
+
+  <div class="ports" id="ports"></div>
+
+  <div class="modes" id="modes"></div>
+
+  <div class="foot">
+    <span id="stamp">—</span>
+    <div class="foot-right">
+      <a href="#" id="panelLink">完整面板 ↗</a>
+      <span class="pinbtn" id="pinBtn" title="固定到当前位置">
+        <svg viewBox="0 0 16 16"><path d="M6 2h4M8 2v5M8 7 4.5 9.5v1.5h7V9.5L8 7v6.5"/></svg>
+      </span>
+      <span class="closebtn" id="closeBtn" title="收进托盘（双击卡片可再打开）">✕</span>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const PORTS = [
+  { key: 'c1', piid: 1, bit: 0, label: 'C1' },
+  { key: 'c2', piid: 2, bit: 1, label: 'C2' },
+  { key: 'c3', piid: 3, bit: 2, label: 'C3' },
+  { key: 'a',  piid: 4, bit: 3, label: 'A'  },
+];
+const MODES = [ [1, 'AI'], [2, '数码'], [3, '单口'], [4, '均衡'] ];
+
+// 从 file:// 加载（桌面窗口程序）时必须走绝对地址，服务增加了 CORS 允许
+const API = location.protocol === 'file:' ? 'http://127.0.0.1:8080' : '';
+
+let last = null;
+let busyPort = null;
+
+const $ = id => document.getElementById(id);
+
+// 浏览器预览时铺一层模拟桌面，判断真实观感；嵌进桌面窗口时保持透明
+if (location.search.includes('preview')) document.body.classList.add('preview');
+// shell=1：由桌面窗口程序加载，卡片铺满窗口并显示收起按钮
+// ⚠️ file:// 分支不能带 ?query：pywebview 用 .NET 的 Uri 构造地址，会把 ? 转义成 %3F，
+// 变成一个不存在的文件名（表现为白底「未找到文件」）。所以 file:// 直接按协议认。
+const isShell = location.search.includes('shell')
+             || location.hash.includes('shell')
+             || location.protocol === 'file:';
+if (isShell) document.body.classList.add('shell');
+
+const hasApi = () => window.pywebview && window.pywebview.api;
+
+// 把实际渲染出来的数据回报给 Python，便于在没有截图能力时验证窗口内部状态
+let lastReport = 0;
+function reportState(text) {
+  if (!hasApi() || !hasApi().report) return;
+  const now = Date.now();
+  if (now - lastReport < 8000) return;
+  lastReport = now;
+  try { window.pywebview.api.report(text); } catch (e) { /* 忽略 */ }
+}
+
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 1400);
+}
+
+// 首次渲染骨架
+$('ports').innerHTML = PORTS.map(p => `
+  <div class="port" data-key="${p.key}">
+    <div class="pname">${p.label}</div>
+    <div class="pw">--</div>
+    <div class="va">--</div>
+  </div>`).join('');
+
+$('modes').innerHTML = MODES.map(([v, label]) => `
+  <div class="mode" data-mode="${v}">${label}</div>`).join('');
+
+document.querySelectorAll('.port').forEach(el => {
+  el.addEventListener('click', () => togglePort(el.dataset.key));
+});
+document.querySelectorAll('.mode').forEach(el => {
+  el.addEventListener('click', () => setMode(+el.dataset.mode));
+});
+
+function render(data) {
+  last = data;
+  const ready = data.state === 'READY';
+  const dot = $('dot');
+
+  dot.className = 'dot' + (ready ? ' on' : data.state === 'DISCONNECTED' ? ' err' : ' warn');
+  $('sub').textContent = ready ? '已连接' : (data.state === 'DISCONNECTED' ? '未连接' : data.state.toLowerCase());
+
+  const portOn = (bit) => {
+    const v = data.settings && data.settings['16'];
+    return v === undefined || v === null ? true : !!(v & (1 << bit));
+  };
+
+  let total = 0;
+  let totalKnown = false;
+
+  PORTS.forEach(p => {
+    const el = document.querySelector(`.port[data-key="${p.key}"]`);
+    const d = data.ports ? data.ports[p.key === 'a' ? 4 : p.piid] : null;
+    const enabled = portOn(p.bit);
+
+    let live = false, power = 0, text = '--', va = '—';
+    if (d) {
+      live = !!d.active && enabled;
+      power = d.power || 0;
+      // 只有端口被软件关闭，才显示"关闭"；否则按实际电流判断是否有负载
+      text = (!enabled) ? '关闭' : (power >= 0.05 ? power.toFixed(power < 10 ? 2 : 1) : '0');
+      va = (!enabled) ? '已断开'
+         : `${d.voltage.toFixed(1)}V · ${d.current.toFixed(2)}A`;
+      if (live && power > 0) totalKnown = true;
+      total += power;
+    } else {
+      text = '—';
+      va = '无读回';
+    }
+
+    // v1.3.8：数值没变就不碰 DOM（原来每 1.2 秒无条件重写一遍文字和 class）
+    const key = text + '|' + va + '|' + (live && power >= 0.05) + '|' + (!enabled);
+    if (el.dataset.lastKey !== key) {
+      el.dataset.lastKey = key;
+      el.classList.toggle('live', live && power >= 0.05);
+      el.classList.toggle('off', !enabled);
+      el.querySelector('.pw').textContent = text;
+      el.querySelector('.va').textContent = va;
+    }
+  });
+
+  const tEl = $('total');
+  if (!ready) {
+    tEl.textContent = '--';
+    tEl.classList.add('dim');
+  } else {
+    const shown = total >= 100 ? total.toFixed(0) : total.toFixed(total < 10 ? 2 : 1);
+    const totalText = totalKnown || total > 0 ? shown : '0';
+    if (tEl.dataset.lastText !== totalText) {
+      tEl.dataset.lastText = totalText;
+      tEl.textContent = totalText;
+    }
+    tEl.classList.toggle('dim', total < 0.05);
+  }
+
+  document.querySelectorAll('.mode').forEach(el => {
+    el.classList.toggle('active', data.settings && +data.settings['5'] === +el.dataset.mode);
+  });
+
+  const now = new Date();
+  $('stamp').textContent = now.toLocaleTimeString('zh-CN', { hour12: false });
+
+  const brief = PORTS.map(p => {
+    const d = data.ports ? data.ports[p.piid] : null;
+    return p.label + '=' + (d ? d.power.toFixed(1) : '-');
+  }).join(' ');
+  const c = document.querySelector('.card');
+  reportState(
+    `state=${data.state} total=${total.toFixed(2)}W ${brief} ` +
+    `vh=${innerHeight} cardH=${c ? c.offsetHeight : -1} ch=${document.body.scrollHeight}`
+  );
+}
+
+async function poll() {
+  // v1.3.8：窗口不可见（收进托盘 / 锁屏）时不发请求，恢复时下一次 poll 自动补上
+  if (document.visibilityState === 'hidden') return;
+  try {
+    const r = await fetch(API + '/api/status', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    render(await r.json());
+  } catch (e) {
+    const dot = $('dot');
+    dot.className = 'dot err';
+    $('sub').textContent = '控制台未响应';
+    $('total').textContent = '--';
+    $('total').classList.add('dim');
+    reportState('fetch-failed ' + e.message);
+  }
+}
+
+async function togglePort(key) {
+  if (busyPort || !last || last.state !== 'READY') { toast('设备未连接'); return; }
+  const p = PORTS.find(x => x.key === key);
+  const cur = last.settings && last.settings['16'];
+  const isOn = cur === undefined ? true : !!(cur & (1 << p.bit));
+  busyPort = key;
+  try {
+    const r = await fetch(API + '/api/port', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port: key, action: isOn ? 'off' : 'on' }),
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || '操作失败');
+    toast(p.label + (isOn ? ' 已关闭' : ' 已开启'));
+    await poll();
+  } catch (e) {
+    toast(p.label + ' 操作失败：' + e.message);
+  } finally {
+    busyPort = null;
+  }
+}
+
+async function setMode(mode) {
+  if (!last || last.state !== 'READY') { toast('设备未连接'); return; }
+  try {
+    const r = await fetch(API + '/api/set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ piid: 5, value: mode }),
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || '操作失败');
+    toast('已切换为「' + (MODES.find(m => m[0] === mode) || [0, '?'])[1] + '」模式');
+    await poll();
+  } catch (e) {
+    toast('切换失败：' + e.message);
+  }
+}
+
+// v1.3.8：1.2s → 2.5s。卡片显示到 0.01W/0.1W，2.5 秒的延迟肉眼看不出来，
+// 但请求数和渲染唤醒少一半；数值没变时 render() 也不再碰 DOM。
+const POLL_MS = 2500;
+poll();
+setInterval(poll, POLL_MS);
+
+// ---------- 桌面窗口（pywebview）交互 ----------
+window.addEventListener('pywebviewready', () => {
+  document.body.classList.add('shell');
+});
+
+$('closeBtn').addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (hasApi()) await window.pywebview.api.hide_window();
+});
+
+$('panelLink').addEventListener('click', async (e) => {
+  // 一律走内置控制台窗口，不再跳系统浏览器
+  e.preventDefault();
+  if (hasApi()) {
+    await window.pywebview.api.open_panel();
+  } else {
+    toast('请在应用窗口中使用');
+  }
+});
+
+document.querySelector('.card').addEventListener('dblclick', (e) => {
+  if (!hasApi()) return;
+  if (e.target.closest('.port, .mode, .closebtn, .pinbtn')) return;
+  window.pywebview.api.open_panel();
+});
+
+// ---------- 固定到指定位置 ----------
+// 固定 = 记下当前窗口矩形，之后一旦被移动（拖动 / 别的程序挪）就拉回去；
+// 同时摘掉 .pywebview-drag-region —— pywebview 的拖动是 JS 在 mousedown 时
+// 查这个类实现的，去掉类就彻底拖不动了，不用改 Python 侧。
+let pinned = false;
+
+function paintPin() {
+  const btn = $('pinBtn');
+  if (!btn) return;
+  btn.classList.toggle('on', pinned);
+  btn.title = pinned ? '已固定，点一下解除' : '固定到当前位置';
+  const head = document.querySelector('.head');
+  if (head) head.classList.toggle('pywebview-drag-region', !pinned);
+}
+
+async function syncPin() {
+  if (!hasApi() || !window.pywebview.api.get_pinned) return;
+  try {
+    const r = await window.pywebview.api.get_pinned();
+    pinned = !!(r && r.pinned);
+    paintPin();
+  } catch (e) { /* 忽略 */ }
+}
+
+$('pinBtn').addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (!hasApi()) return;
+  const want = !pinned;
+  try {
+    const r = await window.pywebview.api.set_pinned(want);
+    pinned = !!(r && r.pinned);
+    paintPin();
+    toast(pinned ? '已固定在当前位置' : '已解除固定，可以拖动');
+  } catch (err) {
+    toast('固定失败：' + err.message);
+  }
+});
+
+window.addEventListener('pywebviewready', syncPin);
+setTimeout(syncPin, 1500);
+</script>
+</body>
+</html>

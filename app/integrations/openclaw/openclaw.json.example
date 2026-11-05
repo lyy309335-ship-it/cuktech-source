@@ -1,0 +1,12 @@
+{
+  "skills": [
+    {
+      "name": "cuktech-charger",
+      "path": "./cuktech-charger",
+      "env": {
+        "CUKTECH_BASE_URL": "http://127.0.0.1:8080",
+        "CUKTECH_API_KEY": ""
+      }
+    }
+  ]
+}

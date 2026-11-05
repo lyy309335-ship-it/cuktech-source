@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>CUKTECH 控制台</title>
+<style>
+  :root{
+    --bg:#0f1116; --card:#171a21; --card2:#1d212a; --line:rgba(255,255,255,.07);
+    --fg:#e8ecf4; --mute:#878fa2; --accent:#6ee7d6; --blue:#3b82f6;
+    --warn:#facc15; --red:#ef4444;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:
+      radial-gradient(1100px 620px at 50% -10%, rgba(59,130,246,.14), transparent 62%),
+      var(--bg);
+    color:var(--fg); overflow:auto; padding:24px 0;
+    font:14px/1.55 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif;
+    user-select:none; -webkit-user-select:none;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .card{width:min(560px,86vw);text-align:center;padding:26px 30px 22px}
+
+  .logo{
+    width:64px;height:64px;border-radius:19px;margin:0 auto 20px;
+    background:linear-gradient(135deg,#6ee7d6,#3b82f6);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 10px 34px rgba(59,130,246,.34);
+    animation:breathe 2.6s ease-in-out infinite;
+  }
+  .logo svg{width:32px;height:32px;fill:#0f1116}
+  @keyframes breathe{
+    0%,100%{transform:translateY(0) scale(1);box-shadow:0 10px 34px rgba(59,130,246,.30)}
+    50%{transform:translateY(-3px) scale(1.03);box-shadow:0 16px 42px rgba(110,231,214,.34)}
+  }
+
+  h1{font-size:19px;font-weight:600;margin:0 0 6px;letter-spacing:.4px}
+  .sub{font-size:13.5px;color:var(--mute);min-height:22px}
+
+  /* 进度条 */
+  .bar{
+    position:relative;height:4px;border-radius:99px;margin:22px auto 10px;
+    width:100%;background:rgba(255,255,255,.06);overflow:hidden;
+  }
+  .bar span{
+    position:absolute;top:0;left:0;height:100%;width:38%;border-radius:99px;
+    background:linear-gradient(90deg,rgba(110,231,214,0),#6ee7d6,#3b82f6,rgba(59,130,246,0));
+    animation:sweep 1.35s ease-in-out infinite;
+  }
+  @keyframes sweep{0%{left:-40%}100%{left:100%}}
+  .bar.done span{animation:none;width:100%;background:var(--accent);opacity:.9}
+  .bar.stall span{animation:none;width:100%;background:var(--warn);opacity:.55}
+
+  .meta{
+    display:flex;justify-content:space-between;align-items:center;
+    font-size:11.5px;color:#5d6474;font-variant-numeric:tabular-nums;
+  }
+  .meta .tip{color:var(--warn);opacity:0;transition:opacity .3s}
+  .meta .tip.show{opacity:1}
+
+  /* 步骤列表 */
+  .steps{
+    margin:24px auto 0;width:100%;text-align:left;
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:6px 16px;
+  }
+  .st{display:flex;align-items:center;gap:11px;padding:9px 0;font-size:12.5px;color:#616a7d}
+  .st+.st{border-top:1px solid rgba(255,255,255,.045)}
+  .st i{
+    width:15px;height:15px;border-radius:50%;flex:0 0 auto;
+    border:1.5px solid #3a4152;position:relative;
+  }
+  .st.cur{color:var(--fg)}
+  .st.cur i{border-color:var(--accent);box-shadow:0 0 0 3px rgba(110,231,214,.13)}
+  .st.cur i::after{
+    content:"";position:absolute;inset:3px;border-radius:50%;background:var(--accent);
+    animation:pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
+  .st.ok{color:#7f8a9e}
+  .st.ok i{border-color:var(--accent);background:var(--accent)}
+  .st.ok i::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--accent)}
+  .st.bad{color:#fca5a5}
+  .st.bad i{border-color:var(--red);background:var(--red)}
+
+  .acts{display:flex;gap:10px;margin-top:24px;justify-content:center}
+  .btn{
+    height:38px;padding:0 18px;border-radius:11px;border:1px solid var(--line);
+    background:var(--card2);color:var(--fg);font-size:12.5px;font-family:inherit;
+    cursor:pointer;transition:.15s;
+  }
+  .btn:hover{background:#252a35;border-color:rgba(255,255,255,.15)}
+  .btn.primary{background:linear-gradient(135deg,#2a9d8f,#3b82f6);border:none;color:#fff}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  .foot{margin-top:20px;font-size:11px;color:#4a5162;line-height:1.7}
+  .link{color:#4b93c7;cursor:pointer;text-decoration:none}
+  .link:hover{text-decoration:underline}
+  .hidden{display:none !important}
+
+  /* 运行管理（引导页也要能开关，不然服务挂了就没入口） */
+  .mgmt{
+    margin:14px auto 0;width:100%;text-align:left;
+    background:var(--card);border:1px solid var(--line);border-radius:14px;padding:4px 16px 12px;
+  }
+  .mg-row{display:flex;align-items:center;gap:12px;padding:9px 0}
+  .mg-row+.mg-row{border-top:1px solid rgba(255,255,255,.045)}
+  .mg-txt{flex:1;min-width:0}
+  .mg-t1{font-size:12.5px}
+  .mg-t2{font-size:10.5px;color:#6c7488;margin-top:1px}
+  .mg-sw{
+    width:40px;height:22px;border-radius:20px;border:none;padding:0;position:relative;
+    background:#39404e;cursor:pointer;transition:background .18s;flex:0 0 auto;
+  }
+  .mg-sw::after{
+    content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;
+    background:#fff;transition:transform .18s;box-shadow:0 1px 3px rgba(0,0,0,.4);
+  }
+  .mg-sw.on{background:var(--accent)}
+  .mg-sw.on::after{transform:translateX(18px)}
+  .mg-sw:disabled{opacity:.45;cursor:not-allowed}
+  .mg-btns{display:flex;gap:8px;margin-top:10px}
+  .mg-btn{
+    flex:1;height:30px;border-radius:9px;border:1px solid var(--line);
+    background:rgba(255,255,255,.045);color:#dfe5f0;font-size:11.5px;font-family:inherit;cursor:pointer;
+  }
+  .mg-btn:hover{background:rgba(255,255,255,.1)}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></div>
+
+  <h1>CUKTECH 控制台</h1>
+  <div class="sub" id="sub">正在启动采集服务…</div>
+
+  <div class="bar" id="bar"><span></span></div>
+  <div class="meta">
+    <span id="elapsed">0.0 s</span>
+    <span class="tip" id="tip">启动比平时慢，蓝牙适配器可能正在初始化</span>
+  </div>
+
+  <div class="steps" id="steps">
+    <div class="st cur" id="s1"><i></i><span>启动采集服务进程</span></div>
+    <div class="st" id="s2"><i></i><span>等待本地接口 127.0.0.1:8080 就绪</span></div>
+    <div class="st" id="s3"><i></i><span>载入控制界面</span></div>
+  </div>
+
+  <div class="mgmt">
+    <div class="mg-row">
+      <div class="mg-txt"><div class="mg-t1">采集服务</div><div class="mg-t2">关掉后蓝牙采集和所有控制失效</div></div>
+      <button class="mg-sw" id="swService"></button>
+    </div>
+    <div class="mg-row">
+      <div class="mg-txt"><div class="mg-t1">桌面卡片</div><div class="mg-t2">常驻桌面的小窗，关掉可省内存</div></div>
+      <button class="mg-sw" id="swWidget"></button>
+    </div>
+    <div class="mg-row">
+      <div class="mg-txt"><div class="mg-t1">开机自启</div><div class="mg-t2">登录系统后自动在托盘运行</div></div>
+      <button class="mg-sw" id="swAutostart"></button>
+    </div>
+    <div class="mg-btns">
+      <button class="mg-btn" id="btnDataDir">数据目录</button>
+      <button class="mg-btn" id="btnQuit">退出程序</button>
+    </div>
+  </div>
+
+  <div class="acts">
+    <button class="btn primary" id="btnRetry">重试</button>
+    <button class="btn" id="btnRestart" style="display:none">重启采集服务</button>
+  </div>
+
+  <div class="foot">
+    采集服务在后台独立进程里跑，关掉这个窗口不影响充电器数据采集<br>
+    <span class="link" id="lnkBrowser">改用系统浏览器打开</span>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------- 小工具
+const $ = (id) => document.getElementById(id);
+let t0 = Date.now();
+let tick = null;
+let finished = false;
+
+function api() {
+  return (window.pywebview && window.pywebview.api) || null;
+}
+
+function setStep(n, cls) {
+  for (let i = 1; i <= 3; i++) {
+    const el = $('s' + i);
+    if (!el) continue;
+    el.className = 'st';
+    if (i < n) el.className = 'st ok';
+    else if (i === n) el.className = 'st ' + (cls || 'cur');
+  }
+}
+
+function setSub(text) { $('sub').textContent = text; }
+
+function startTimer() {
+  if (tick) return;
+  tick = setInterval(() => {
+    const s = (Date.now() - t0) / 1000;
+    $('elapsed').textContent = s.toFixed(1) + ' s';
+    if (s > 12) $('tip').classList.add('show');
+  }, 100);
+}
+
+function stopTimer() { if (tick) { clearInterval(tick); tick = null; } }
+
+// ---------------------------------------------------------------- 对外状态机
+// Python 侧用 evaluate_js 调这几个方法推进界面
+window.__ctl = {
+  step: function (n, text) {
+    if (finished) return;
+    setStep(n);
+    if (text) setSub(text);
+    startTimer();
+  },
+  slow: function (text) {
+    $('bar').classList.add('stall');
+    $('tip').classList.add('show');
+    if (text) setSub(text);
+  },
+  ok: function () {
+    if (finished) return;
+    finished = true;
+    stopTimer();
+    setStep(4);               // 全部置为完成
+    $('bar').classList.add('done');
+    $('sub').textContent = '界面加载中…';
+  },
+  fail: function (msg) {
+    if (finished) return;
+    finished = true;
+    stopTimer();
+    $('bar').classList.add('stall');
+    setStep(2, 'bad');
+    $('sub').textContent = '采集服务没能启动';
+    $('steps').classList.add('hidden');
+    $('btnRestart').style.display = '';
+    if (msg) {
+      $('tip').textContent = msg;
+      $('tip').classList.add('show');
+    }
+  }
+};
+
+// ---------------------------------------------------------------- 用户动作
+$('btnRetry').onclick = () => {
+  const a = api();
+  if (!a) return;
+  resetUi();
+  a.console_boot();
+};
+$('btnRestart').onclick = () => {
+  const a = api();
+  if (!a) return;
+  resetUi();
+  a.console_restart_service();
+};
+$('lnkBrowser').onclick = () => { const a = api(); if (a) a.open_browser_console(); };
+
+// ---------------------------------------------------------------- 运行管理
+// 引导页也要能开关，否则服务挂了用户就没有任何入口（托盘之外）。
+function paintState(s) {
+  if (!s) return;
+  $('swService').classList.toggle('on', !!s.serviceRunning);
+  $('swWidget').classList.toggle('on', !!s.widgetRunning);
+  $('swAutostart').classList.toggle('on', !!s.autostart);
+}
+
+function refreshState() {
+  const a = api();
+  if (!a) return;
+  a.get_state().then(paintState).catch(() => {});
+}
+
+function bindSwitch(id, method, label) {
+  $(id).onclick = () => {
+    const a = api();
+    if (!a) return;
+    const el = $(id);
+    const want = !el.classList.contains('on');
+    el.disabled = true;
+    el.classList.toggle('on', want);        // 先乐观更新，失败再刷新回真实状态
+    a[method](want).then(paintState).catch(() => {
+      $('sub').textContent = label + '切换失败';
+    }).then(() => { setTimeout(() => { el.disabled = false; refreshState(); }, 260); });
+  };
+}
+
+bindSwitch('swService', 'set_service', '采集服务');
+bindSwitch('swWidget', 'set_widget', '桌面卡片');
+bindSwitch('swAutostart', 'set_autostart', '开机自启');
+$('btnDataDir').onclick = () => { const a = api(); if (a) a.open_data_dir(); };
+$('btnQuit').onclick = () => { const a = api(); if (a) a.quit_app(); };
+
+setInterval(refreshState, 2000);
+
+function resetUi() {
+  finished = false;
+  t0 = Date.now();
+  $('elapsed').textContent = '0.0 s';
+  $('bar').className = 'bar';
+  $('tip').className = 'tip';
+  $('steps').classList.remove('hidden');
+  $('btnRestart').style.display = 'none';
+  $('sub').textContent = '正在启动采集服务…';
+  setStep(1);
+  startTimer();
+}
+
+// ---------------------------------------------------------------- 启动
+function boot() {
+  startTimer();
+  refreshState();
+  const a = api();
+  if (a) a.console_boot();
+}
+window.addEventListener('pywebviewready', boot);
+// 页面可能比 pywebviewready 更晚加载完，兜一次
+setTimeout(() => { if (!finished && Date.now() - t0 < 900) boot(); }, 500);
+</script>
+</body>
+</html>

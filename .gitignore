@@ -1,0 +1,53 @@
+# ============================================================
+#  仓库根 .gitignore
+#  只提交源码与文档；凭据、运行时数据、构建产物一律排除
+# ============================================================
+
+# ---- 安装包（体积大，发 GitHub Releases）----
+/*.exe
+/*.msi
+/*.zip
+
+# ---- 构建产物 ----
+/app/dist/
+/app/build/
+/app/_backup_*/
+/app/*.spec.bak
+
+# ---- 运行时数据（历史库、WebView2 缓存、自动开关状态）----
+/app/data/
+/app/logs/
+
+# ---- 设备凭据：绝不提交 ----
+/app/.env
+/app/.env.local
+/app/secrets.json
+
+# ---- 第三方二进制工具 ----
+/tools/*.exe
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 本地调试残留 ----
+*.bak
+*.bak-*
+*.bak_*
+*.orig
+*.rej
+*~
+
+# ---- 系统与编辑器 ----
+Thumbs.db
+desktop.ini
+.DS_Store
+/NVIDIA Corporation/
+.idea/
+.vscode/

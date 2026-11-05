@@ -1,0 +1,1748 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>CUKTECH 充电器控制面板</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0f1117;
+  --card: #1a1d27;
+  --card-border: #2a2d3a;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --green: #22c55e;
+  --green-dim: #166534;
+  --red: #ef4444;
+  --amber: #f59e0b;
+  --text: #e2e8f0;
+  --text-dim: #94a3b8;
+  --text-bright: #f8fafc;
+  --radius: 10px;
+  --touch-min: 44px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Header */
+.header {
+  background: var(--card);
+  border-bottom: 1px solid var(--card-border);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  gap: 12px;
+}
+
+.header-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.header h1 {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-bright);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.energy-flow {
+  --flow-level: 0;
+  --flow-speed: 2s;
+  --pulse-speed: 2.2s;
+  --flow-bright: 0.5;
+  --tail-alpha: 0.35;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+}
+
+.energy-icon {
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.flow-track {
+  position: relative;
+  width: 230px;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  background: linear-gradient(90deg, rgba(59,130,246,0.08), rgba(34,197,94,0.08));
+  overflow: hidden;
+}
+
+.flow-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(59,130,246,0.08) 0px,
+      rgba(59,130,246,0.08) 8px,
+      rgba(34,197,94,0.55) 8px,
+      rgba(34,197,94,0.55) 16px
+    );
+  filter: brightness(var(--flow-bright));
+  animation: flowStripe var(--flow-speed) linear infinite;
+  transition: width 0.5s ease, filter 0.4s ease;
+}
+
+.flow-pulse {
+  position: absolute;
+  top: 50%;
+  left: -14px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transform: translateY(-50%);
+  background: radial-gradient(circle, rgba(255,255,255,0.95) 0%, rgba(34,197,94,0.9) 45%, rgba(59,130,246,0.15) 100%);
+  box-shadow: 0 0 12px rgba(34,197,94,0.7);
+  opacity: 0;
+}
+
+.energy-flow.active .flow-pulse {
+  opacity: 1;
+  animation: flowPulse var(--pulse-speed) linear infinite;
+}
+
+.flow-tail {
+  position: absolute;
+  top: 50%;
+  left: -20px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  background: radial-gradient(circle, rgba(147, 197, 253, 0.95) 0%, rgba(59,130,246,0.55) 60%, rgba(34,197,94,0) 100%);
+  filter: blur(0.4px);
+  box-shadow: 0 0 9px rgba(59,130,246,0.6);
+  pointer-events: none;
+}
+
+.flow-tail.t2 {
+  width: 8px;
+  height: 8px;
+  filter: blur(0.8px);
+}
+
+.energy-flow.boost.active .flow-tail {
+  animation: flowTail var(--pulse-speed) linear infinite;
+}
+
+.energy-flow.boost.active .flow-tail.t2 {
+  animation-delay: calc(var(--pulse-speed) * -0.22);
+}
+
+.energy-flow .power-val {
+  min-width: 54px;
+  text-align: right;
+  font-size: 18px;
+  font-weight: 700;
+  color: #86efac;
+  letter-spacing: 0.2px;
+}
+
+.energy-flow.zero .power-val {
+  color: var(--text-dim);
+}
+
+@keyframes flowStripe {
+  from { background-position: 0 0; }
+  to { background-position: 40px 0; }
+}
+
+@keyframes flowPulse {
+  0% { left: -14px; opacity: 0.0; }
+  8% { opacity: 1; }
+  92% { opacity: 1; }
+  100% { left: calc(100% - 2px); opacity: 0.0; }
+}
+
+@keyframes flowTail {
+  0% { left: -22px; opacity: 0.0; transform: translateY(-50%) scale(0.8); }
+  12% { opacity: var(--tail-alpha); }
+  62% { opacity: calc(var(--tail-alpha) * 0.75); }
+  100% { left: calc(100% - 8px); opacity: 0.0; transform: translateY(-50%) scale(0.45); }
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.view-switch {
+  display: flex;
+  gap: 6px;
+}
+
+.view-btn {
+  border: 1px solid var(--card-border);
+  background: var(--bg);
+  color: var(--text-dim);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.view-btn.active {
+  color: var(--text-bright);
+  border-color: var(--primary);
+  background: rgba(59,130,246,0.18);
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #64748b;
+  display: inline-block;
+  transition: background 0.3s;
+}
+.status-dot.ready { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.status-dot.connecting { background: var(--amber); animation: pulse 1s infinite; }
+.status-dot.disconnected { background: #64748b; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.status-text {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.btn-icon {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.btn-icon:hover { border-color: var(--primary); color: var(--primary); }
+.btn-icon:active { background: var(--primary); color: #fff; }
+.btn-icon.spinning { animation: spin 0.8s linear infinite; }
+
+.btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #fff;
+  min-height: var(--touch-min);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary { background: var(--primary); }
+.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-danger { background: var(--red); }
+.btn-danger:hover:not(:disabled) { background: #dc2626; }
+.btn-small {
+  padding: 6px 14px;
+  font-size: 12px;
+  min-height: 32px;
+}
+
+/* Offline banner */
+.offline-banner {
+  background: #78350f;
+  border-bottom: 1px solid var(--amber);
+  color: var(--amber);
+  text-align: center;
+  padding: 8px 16px;
+  font-size: 13px;
+  display: none;
+}
+.offline-banner.visible { display: block; }
+
+/* Main content */
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.history-toolbar {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr auto;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.history-toolbar select,
+.history-toolbar input {
+  width: 100%;
+  border: 1px solid var(--card-border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.chart-wrap {
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 10px 10px 14px;
+  margin-bottom: 10px;
+  height: 320px;
+  overflow: visible;
+}
+
+.chart-title {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.chart-canvas {
+  width: 100%;
+  height: calc(100% - 28px);
+  display: block;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Disabled overlay for when not connected */
+.controls-disabled {
+  pointer-events: none;
+  opacity: 0.4;
+  filter: grayscale(0.5);
+}
+
+/* Port cards */
+.ports-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.port-card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 14px 10px;
+  text-align: center;
+  transition: border-color 0.3s;
+  position: relative;
+  overflow: hidden;
+}
+
+.port-card.active {
+  border-color: var(--green);
+}
+
+.port-card.power-low {
+  box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.28);
+}
+.port-card.power-mid {
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.32), 0 0 14px rgba(245, 158, 11, 0.12);
+}
+.port-card.power-high {
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.38), 0 0 18px rgba(239, 68, 68, 0.2);
+  animation: powerPulse 1.1s ease-in-out infinite;
+}
+
+@keyframes powerPulse {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1px); }
+}
+
+.port-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-bright);
+  margin-bottom: 2px;
+}
+
+.port-type {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+/* Port data display */
+.port-data {
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  min-height: 44px;
+}
+.port-power {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-bright);
+  margin-bottom: 2px;
+}
+.port-power.zero { color: var(--text-dim); font-size: 16px; }
+.port-detail {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* Power bar */
+.power-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(255,255,255,0.05);
+}
+.power-fill {
+  height: 100%;
+  width: 0;
+  transition: width 0.5s ease, background 0.5s ease;
+  border-radius: 0 2px 2px 0;
+}
+
+
+/* Toggle switch */
+.toggle-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.toggle input { display: none; }
+.toggle .slider {
+  position: absolute;
+  inset: 0;
+  background: #334155;
+  border-radius: 12px;
+  transition: background 0.3s;
+}
+.toggle .slider::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.3s;
+}
+.toggle input:checked + .slider { background: var(--green); }
+.toggle input:checked + .slider::before { transform: translateX(20px); }
+
+.toggle-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* Timer presets */
+.timer-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.timer-preset {
+  padding: 4px 8px;
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-height: 28px;
+}
+.timer-preset:hover { border-color: var(--primary); color: var(--primary); }
+.timer-preset:active { background: var(--primary); color: #fff; }
+.timer-input {
+  width: 42px;
+  padding: 4px;
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  text-align: center;
+}
+.timer-set-btn {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+  min-height: 28px;
+}
+
+/* Settings rows */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid #1e2130;
+  gap: 12px;
+}
+.setting-row:last-child { border-bottom: none; }
+
+.setting-label {
+  font-size: 14px;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+/* Segmented control */
+.seg-group {
+  display: flex;
+  gap: 4px;
+  background: var(--bg);
+  padding: 3px;
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.seg-btn {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  min-height: 32px;
+}
+.seg-btn:hover { color: var(--text); }
+.seg-btn.active {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 500;
+}
+
+/* Sending state (prevent double-tap) */
+.sending {
+  opacity: 0.6;
+  pointer-events: none;
+  animation: sendPulse 0.8s ease infinite;
+}
+@keyframes sendPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 0.35; }
+}
+
+/* Page buttons */
+.page-btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.page-btn {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.page-btn:hover { border-color: var(--primary); color: var(--primary); }
+.page-btn:active { background: var(--primary); color: #fff; }
+
+/* Toast */
+.toast-container {
+  position: fixed;
+  top: 70px;
+  right: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #fff;
+  animation: slideIn 0.3s ease;
+  max-width: 280px;
+  pointer-events: auto;
+}
+.toast.success { background: var(--green-dim); border: 1px solid var(--green); }
+.toast.error { background: #7f1d1d; border: 1px solid var(--red); }
+.toast.info { background: #1e3a5f; border: 1px solid var(--primary); }
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Loading spinner on buttons */
+.loading {
+  position: relative;
+  color: transparent !important;
+}
+.loading::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  left: 50%;
+  top: 50%;
+  margin: -8px 0 0 -8px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ========================================
+   Responsive: Tablet (≤768px)
+   ======================================== */
+@media (max-width: 768px) {
+  .ports-grid { grid-template-columns: repeat(2, 1fr); }
+  .container { padding: 14px; gap: 14px; }
+}
+
+/* ========================================
+   Responsive: Phone (≤480px)
+   ======================================== */
+@media (max-width: 480px) {
+  .header {
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    gap: 8px;
+  }
+  .header h1 { font-size: 15px; }
+  .flow-track { width: 160px; height: 12px; }
+  .energy-flow .power-val { font-size: 16px; min-width: 50px; }
+
+  .header-right { width: 100%; justify-content: space-between; }
+  #connectBtn { flex: 1; }
+
+  .container { padding: 10px; gap: 10px; }
+  .card { padding: 14px 12px; }
+  .ports-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .port-card { padding: 12px 8px; }
+  .port-name { font-size: 16px; }
+  .port-power { font-size: 20px; }
+
+  /* Stack setting rows vertically */
+  .setting-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  /* Segmented buttons: grid wrap */
+  .seg-group {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+    gap: 4px;
+  }
+  .seg-btn {
+    padding: 8px 6px;
+    font-size: 12px;
+    min-height: var(--touch-min);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Enlarge toggles */
+  .toggle { width: 52px; height: 28px; }
+  .toggle .slider { border-radius: 14px; }
+  .toggle .slider::before { width: 22px; height: 22px; }
+  .toggle input:checked + .slider::before { transform: translateX(24px); }
+
+  /* Timer input enlarge */
+  .timer-input {
+    width: 54px;
+    padding: 6px;
+    font-size: 16px; /* prevent iOS zoom */
+  }
+  .timer-preset { padding: 6px 10px; font-size: 12px; min-height: 36px; }
+
+  .history-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  /* Page buttons enlarge */
+  .page-btn { width: 48px; height: 48px; font-size: 18px; }
+
+  /* Toast at bottom on mobile */
+  .toast-container {
+    top: auto;
+    bottom: 16px;
+    right: 12px;
+    left: 12px;
+  }
+  .toast {
+    max-width: 100%;
+    animation: slideUp 0.3s ease;
+  }
+}
+
+/* ============================================================
+   v1.3.8 常驻动画受控
+   ------------------------------------------------------------
+   下面这四组动画原来都是 infinite，和数据变没变无关，一直以 60fps
+   在合成层上滚动 —— 这是渲染进程 3.2% + GPU 1.8% 的主要来源。
+   现在默认暂停（静态画面一模一样，只是不滚），只在数值真的变了
+   之后短暂恢复 1.2 秒（见 kickAnim()）。窗口隐藏时整页暂停。
+   ============================================================ */
+html.viz-idle .flow-fill,
+html.viz-idle .energy-flow.active .flow-pulse,
+html.viz-idle .energy-flow.boost.active .flow-tail,
+html.viz-idle .port-card.power-high {
+  animation-play-state: paused;
+}
+
+/* 窗口隐藏（收进托盘 / 锁屏）时，不只是上面四组，全页动画一律停。
+   原来 viz-paused 只是个 JS 标志，没有样式兜底 —— 一旦有别的地方让
+   viz-idle 先被摘掉（或将来新增动画忘了加进上面那一组），隐藏期间照样
+   按 60fps 跑。这条 !important 规则是那道保险。 */
+html.viz-paused *,
+html.viz-paused *::before,
+html.viz-paused *::after {
+  animation-play-state: paused !important;
+}
+
+/* 注意：这里刻意不加 `@media (prefers-reduced-motion: reduce)` 去 animation:none。
+   实测本机 WebView2 报的就是 reduce（Windows「显示动画」相关设置会影响它），
+   加了这条等于把流光动画永久关掉 —— 充电时那道流动光效直接不动了，
+   属于用户没要求的视觉回退。控制动画只走上面 viz-idle / viz-paused 两条通道。 */
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-left">
+    <h1>CUKTECH 充电器控制面板</h1>
+    <div class="energy-flow zero" id="totalPowerWrap">
+      <span class="energy-icon">⚡</span>
+      <div class="flow-track">
+        <div class="flow-fill" id="energyFlowFill"></div>
+        <div class="flow-pulse"></div>
+        <div class="flow-tail t1"></div>
+        <div class="flow-tail t2"></div>
+      </div>
+      <span class="energy-icon">🔋</span>
+      <span class="power-val" id="totalPower">0W</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="view-switch">
+      <button class="view-btn active" id="view-main-btn" onclick="switchView('main')">主控</button>
+      <button class="view-btn" id="view-history-btn" onclick="switchView('history')">历史</button>
+    </div>
+    <span class="status-dot disconnected" id="statusDot"></span>
+    <span class="status-text" id="statusText">未连接</span>
+    <button class="btn-icon" id="refreshBtn" onclick="refreshSettings()" title="刷新">&#x21bb;</button>
+    <button class="btn btn-primary" id="connectBtn" onclick="toggleConnection()">连接设备</button>
+  </div>
+</div>
+
+<!-- Offline banner -->
+<div class="offline-banner" id="offlineBanner">连接已断开，正在重连...</div>
+
+<!-- Main -->
+<div class="container">
+  <!-- Port Control -->
+  <div id="mainView">
+  <div id="controlsArea" class="controls-disabled">
+    <div class="card">
+      <div class="card-title">端口控制</div>
+      <div class="ports-grid">
+        <div class="port-card" id="port-c1">
+          <div class="port-name">C1</div>
+          <div class="port-type">USB-C</div>
+          <div class="port-data" id="portdata-c1">
+            <div class="port-power zero">--</div>
+            <div class="port-detail">-- V / -- A</div>
+          </div>
+          <div class="toggle-wrap">
+            <label class="toggle">
+              <input type="checkbox" checked data-port="c1" onchange="togglePort('c1', this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="timer-row">
+            <button class="timer-preset" onclick="setTimerPreset('c1',15)">15m</button>
+            <button class="timer-preset" onclick="setTimerPreset('c1',30)">30m</button>
+            <button class="timer-preset" onclick="setTimerPreset('c1',60)">60m</button>
+            <input type="number" class="timer-input" id="timer-c1" min="0" max="1440" placeholder="0">
+            <button class="timer-set-btn" onclick="setTimer('c1')">设定</button>
+          </div>
+          <div class="power-bar"><div class="power-fill" id="bar-c1"></div></div>
+        </div>
+        <div class="port-card" id="port-c2">
+          <div class="port-name">C2</div>
+          <div class="port-type">USB-C</div>
+          <div class="port-data" id="portdata-c2">
+            <div class="port-power zero">--</div>
+            <div class="port-detail">-- V / -- A</div>
+          </div>
+          <div class="toggle-wrap">
+            <label class="toggle">
+              <input type="checkbox" checked data-port="c2" onchange="togglePort('c2', this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="timer-row">
+            <button class="timer-preset" onclick="setTimerPreset('c2',15)">15m</button>
+            <button class="timer-preset" onclick="setTimerPreset('c2',30)">30m</button>
+            <button class="timer-preset" onclick="setTimerPreset('c2',60)">60m</button>
+            <input type="number" class="timer-input" id="timer-c2" min="0" max="1440" placeholder="0">
+            <button class="timer-set-btn" onclick="setTimer('c2')">设定</button>
+          </div>
+          <div class="power-bar"><div class="power-fill" id="bar-c2"></div></div>
+        </div>
+        <div class="port-card" id="port-c3">
+          <div class="port-name">C3</div>
+          <div class="port-type">USB-C</div>
+          <div class="port-data" id="portdata-c3">
+            <div class="port-power zero">--</div>
+            <div class="port-detail">-- V / -- A</div>
+          </div>
+          <div class="toggle-wrap">
+            <label class="toggle">
+              <input type="checkbox" checked data-port="c3" onchange="togglePort('c3', this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="timer-row">
+            <button class="timer-preset" onclick="setTimerPreset('c3',15)">15m</button>
+            <button class="timer-preset" onclick="setTimerPreset('c3',30)">30m</button>
+            <button class="timer-preset" onclick="setTimerPreset('c3',60)">60m</button>
+            <input type="number" class="timer-input" id="timer-c3" min="0" max="1440" placeholder="0">
+            <button class="timer-set-btn" onclick="setTimer('c3')">设定</button>
+          </div>
+          <div class="power-bar"><div class="power-fill" id="bar-c3"></div></div>
+        </div>
+        <div class="port-card" id="port-a">
+          <div class="port-name">A</div>
+          <div class="port-type">USB-A</div>
+          <div class="port-data" id="portdata-a">
+            <div class="port-power zero">--</div>
+            <div class="port-detail">-- V / -- A</div>
+          </div>
+          <div class="toggle-wrap">
+            <label class="toggle">
+              <input type="checkbox" checked data-port="a" onchange="togglePort('a', this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="timer-row">
+            <button class="timer-preset" onclick="setTimerPreset('a',15)">15m</button>
+            <button class="timer-preset" onclick="setTimerPreset('a',30)">30m</button>
+            <button class="timer-preset" onclick="setTimerPreset('a',60)">60m</button>
+            <input type="number" class="timer-input" id="timer-a" min="0" max="1440" placeholder="0">
+            <button class="timer-set-btn" onclick="setTimer('a')">设定</button>
+          </div>
+          <div class="power-bar"><div class="power-fill" id="bar-a"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="card">
+      <div class="card-title">设备设置</div>
+
+      <!-- Scene Mode -->
+      <div class="setting-row">
+        <span class="setting-label">场景模式</span>
+        <div class="seg-group" id="seg-mode">
+          <button class="seg-btn" data-piid="5" data-value="1" onclick="setSetting(5,1,this)">AI</button>
+          <button class="seg-btn" data-piid="5" data-value="2" onclick="setSetting(5,2,this)">数码生态</button>
+          <button class="seg-btn" data-piid="5" data-value="3" onclick="setSetting(5,3,this)">单口</button>
+          <button class="seg-btn" data-piid="5" data-value="4" onclick="setSetting(5,4,this)">均衡</button>
+        </div>
+      </div>
+
+      <!-- Screen Timeout -->
+      <div class="setting-row">
+        <span class="setting-label">息屏时间</span>
+        <div class="seg-group" id="seg-screen">
+          <button class="seg-btn" data-piid="6" data-value="5" onclick="setSetting(6,5,this)">1分钟</button>
+          <button class="seg-btn" data-piid="6" data-value="1" onclick="setSetting(6,1,this)">5分钟</button>
+          <button class="seg-btn" data-piid="6" data-value="2" onclick="setSetting(6,2,this)">10分钟</button>
+          <button class="seg-btn" data-piid="6" data-value="3" onclick="setSetting(6,3,this)">30分钟</button>
+          <button class="seg-btn" data-piid="6" data-value="4" onclick="setSetting(6,4,this)">常亮</button>
+        </div>
+      </div>
+
+      <!-- Language -->
+      <div class="setting-row">
+        <span class="setting-label">语言</span>
+        <div class="seg-group" id="seg-lang">
+          <button class="seg-btn" data-piid="13" data-value="0" onclick="setSetting(13,0,this)">English</button>
+          <button class="seg-btn" data-piid="13" data-value="1" onclick="setSetting(13,1,this)">中文</button>
+        </div>
+      </div>
+
+      <!-- USB-A Always On -->
+      <div class="setting-row">
+        <span class="setting-label">USB-A 常通电</span>
+        <div class="toggle-wrap">
+          <label class="toggle">
+            <input type="checkbox" id="toggle-15" onchange="setSetting(15, this.checked?1:0)">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Idle Screen Off -->
+      <div class="setting-row">
+        <span class="setting-label">空闲息屏</span>
+        <div class="toggle-wrap">
+          <label class="toggle">
+            <input type="checkbox" id="toggle-19" onchange="setSetting(19, this.checked?1:0)">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Orientation Lock -->
+      <div class="setting-row">
+        <span class="setting-label">屏幕方向锁</span>
+        <div class="toggle-wrap">
+          <label class="toggle">
+            <input type="checkbox" id="toggle-20" onchange="setSetting(20, this.checked?1:0)">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  </div>
+
+  <div id="historyView" class="hidden">
+    <div class="card">
+      <div class="card-title">历史曲线</div>
+      <div class="history-toolbar">
+        <select id="historyDate"></select>
+        <select id="historyPort">
+          <option value="c1">C1</option>
+          <option value="c2">C2</option>
+          <option value="c3">C3</option>
+          <option value="a">A</option>
+          <option value="total">总功率</option>
+        </select>
+        <select id="historyMetric">
+          <option value="power">功率 (W)</option>
+          <option value="voltage">电压 (V)</option>
+          <option value="current">电流 (A)</option>
+        </select>
+        <select id="historyGranularity">
+          <option value="second">按秒</option>
+          <option value="minute">按分钟</option>
+          <option value="hour">按小时</option>
+          <option value="day">按天</option>
+          <option value="month">按月</option>
+          <option value="year">按年</option>
+        </select>
+        <button class="btn btn-primary btn-small" onclick="loadHistoryData()">查看</button>
+      </div>
+      <div class="chart-wrap">
+        <div class="chart-title" id="historyChartTitle">功率 (W)</div>
+        <canvas id="historyChart" class="chart-canvas"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- 优先用本地 vendor（离线可用）；缺失时回落到 CDN -->
+<script src="/vendor/chart.umd.min.js"></script>
+<script>
+  if (!window.Chart) {
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js';
+    s.onload = function () {
+      try { if (typeof loadHistoryData === 'function') loadHistoryData(); } catch (e) {}
+    };
+    document.head.appendChild(s);
+  }
+</script>
+<script>
+// ============================================================
+// State
+// ============================================================
+let connectionState = 'DISCONNECTED';
+let settings = {};
+let updatingFromServer = false;
+let ws = null;
+let wsReconnectTimer = null;
+let portDataCache = { c1: null, c2: null, c3: null, a: null };
+let historyChart = null;
+
+// ---- v1.3.8 渲染节流状态 ----
+// dirtyPorts：本帧内有哪些端口收到了新消息
+// rafPending：已经排了一帧，别重复排
+// animTimer：环境动画的"短暂唤醒"计时器
+const dirtyPorts = new Set();
+let rafPending = false;
+let animTimer = 0;
+
+// 页面一进来就是静止状态，只有数据变化才短暂动一下
+document.documentElement.classList.add('viz-idle');
+
+// 数据真的变了才让流光跑 1.2 秒；隐藏时一律不动
+function kickAnim() {
+  const root = document.documentElement;
+  if (root.classList.contains('viz-paused')) return;
+  root.classList.remove('viz-idle');
+  clearTimeout(animTimer);
+  animTimer = setTimeout(() => root.classList.add('viz-idle'), 1200);
+}
+
+// 一帧最多重绘一次：BLE 每秒可能推好几次，原来每次都整屏重排
+function scheduleRender() {
+  if (rafPending) return;
+  if (document.documentElement.classList.contains('viz-paused')) return;
+  rafPending = true;
+  requestAnimationFrame(() => {
+    rafPending = false;
+    // 关键：排帧的那一刻还没暂停，回调真正执行时可能已经被 setPaused(true)。
+    // 不复查就会在「暂停之后」再画一帧（实测能画出 59 个 DOM 变更），
+    // 清掉脏标记，等恢复时 setPaused(false) 会重新全量补一遍。
+    if (document.documentElement.classList.contains('viz-paused')) {
+      dirtyPorts.clear();
+      return;
+    }
+    if (!dirtyPorts.size) return;
+    dirtyPorts.clear();
+    renderPortsDisplay();
+    updateTotalPower();
+    kickAnim();
+  });
+}
+
+const POWER_LIMITS = {
+  ports: {
+    c1: { sceneMax: 100, hardMax: 120 },
+    c2: { sceneMax: 100, hardMax: 120 },
+    c3: { sceneMax: 44, hardMax: 55 },
+    a: { sceneMax: 22.5, hardMax: 30 },
+  },
+  total: { sceneMax: 110, hardMax: 125 },
+};
+
+// ============================================================
+// Haptic feedback (Android only, silently ignored elsewhere)
+// ============================================================
+function haptic() { navigator.vibrate && navigator.vibrate(10); }
+
+// ============================================================
+// WebSocket
+// ============================================================
+function connectWebSocket() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+    document.getElementById('offlineBanner').classList.remove('visible');
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'state') {
+      updateConnectionState(msg.state);
+    } else if (msg.type === 'settings') {
+      updatingFromServer = true;
+      settings = msg.settings;
+      renderSettings();
+      updatingFromServer = false;
+    } else if (msg.type === 'port') {
+      // v1.3.8：只记缓存 + 打脏标记，交给 requestAnimationFrame 合帧渲染
+      portDataCache[msg.port] = msg;
+      dirtyPorts.add(msg.port);
+      scheduleRender();
+    }
+  };
+
+  ws.onclose = () => {
+    ws = null;
+    // Show offline banner only if we were connected
+    if (connectionState === 'READY') {
+      document.getElementById('offlineBanner').classList.add('visible');
+    }
+    if (!wsReconnectTimer) {
+      wsReconnectTimer = setTimeout(connectWebSocket, 2000);
+    }
+  };
+
+  ws.onerror = () => { ws && ws.close(); };
+}
+
+// ============================================================
+// Connection state
+// ============================================================
+function updateConnectionState(state) {
+  connectionState = state;
+  const dot = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  const btn = document.getElementById('connectBtn');
+  const controls = document.getElementById('controlsArea');
+
+  dot.className = 'status-dot';
+
+  if (state === 'READY') {
+    dot.classList.add('ready');
+    text.textContent = '已连接';
+    btn.textContent = '断开';
+    btn.className = 'btn btn-danger';
+    btn.disabled = false;
+    controls.classList.remove('controls-disabled');
+    document.getElementById('offlineBanner').classList.remove('visible');
+  } else if (state === 'CONNECTING' || state === 'AUTHENTICATING') {
+    dot.classList.add('connecting');
+    text.textContent = state === 'CONNECTING' ? '连接中...' : '认证中...';
+    btn.textContent = '连接中...';
+    btn.className = 'btn btn-primary loading';
+    btn.disabled = true;
+    controls.classList.add('controls-disabled');
+  } else {
+    dot.classList.add('disconnected');
+    text.textContent = '未连接';
+    btn.textContent = '连接设备';
+    btn.className = 'btn btn-primary';
+    btn.disabled = false;
+    controls.classList.add('controls-disabled');
+  }
+}
+
+function switchView(view) {
+  const mainView = document.getElementById('mainView');
+  const historyView = document.getElementById('historyView');
+  const mainBtn = document.getElementById('view-main-btn');
+  const historyBtn = document.getElementById('view-history-btn');
+
+  if (view === 'history') {
+    mainView.classList.add('hidden');
+    historyView.classList.remove('hidden');
+    mainBtn.classList.remove('active');
+    historyBtn.classList.add('active');
+    loadHistoryData();
+  } else {
+    historyView.classList.add('hidden');
+    mainView.classList.remove('hidden');
+    historyBtn.classList.remove('active');
+    mainBtn.classList.add('active');
+  }
+}
+
+// ============================================================
+// Render settings to UI
+// ============================================================
+function renderSettings() {
+  // Segmented buttons (piid 5, 6, 13)
+  document.querySelectorAll('.seg-btn').forEach(btn => {
+    const piid = btn.dataset.piid;
+    const value = parseInt(btn.dataset.value);
+    const current = settings[piid];
+    const currentInt = current !== undefined ? parseInt(current) : undefined;
+    const isScreenOneMinuteAlias = (piid === '6' && value === 5 && currentInt === 5);
+    const isScreenFiveMinuteAlias = (piid === '6' && value === 1 && (currentInt === 0 || currentInt === 1));
+    const isScreenAlwaysOnAlias = (piid === '6' && value === 4 && (currentInt === 4));
+    if ((currentInt !== undefined && currentInt === value) || isScreenOneMinuteAlias || isScreenFiveMinuteAlias || isScreenAlwaysOnAlias) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+    btn.classList.remove('sending');
+  });
+
+  // Toggle switches (piid 15, 19, 20)
+  [15, 19, 20].forEach(piid => {
+    const el = document.getElementById(`toggle-${piid}`);
+    if (el && settings[piid] !== undefined) {
+      el.checked = parseInt(settings[piid]) === 1;
+    }
+  });
+
+  // Port toggles from PIID 16 bitmask
+  const portVal = settings['16'];
+  if (portVal !== undefined) {
+    const v = parseInt(portVal);
+    const ports = {c1: 0, c2: 1, c3: 2, a: 3};
+    for (const [port, bit] of Object.entries(ports)) {
+      const cb = document.querySelector(`input[data-port="${port}"]`);
+      const card = document.getElementById(`port-${port}`);
+      if (cb) {
+        const isOn = (v >> bit) & 1;
+        cb.checked = !!isOn;
+        if (isOn) { card.classList.add('active'); }
+        else { card.classList.remove('active'); }
+      }
+    }
+  }
+}
+
+// ============================================================
+// Port data display + total power + power bar
+// ============================================================
+function updatePortData(port, data) {
+  // v1.3.8：保留这个入口给非推送场景（设置变更后手工刷新），
+  // 推送路径已经改走 dirtyPorts + scheduleRender()
+  portDataCache[port] = data;
+  dirtyPorts.add(port);
+  scheduleRender();
+}
+
+function renderPortsDisplay() {
+  const c3 = portDataCache.c3;
+  const a = portDataCache.a;
+
+  const c3On = !!(c3 && c3.active && (c3.power || 0) > 0);
+  const aOn = !!(a && a.active && (a.power || 0) > 0);
+
+  // C3 与 A 同时输出时，合并显示为同一路
+  if (c3On && aOn) {
+    const mergedPower = (c3.power || 0) + (a.power || 0);
+    const mergedVoltage = c3.voltage || a.voltage || 0;
+    const mergedCurrent = mergedVoltage > 0 ? (mergedPower / mergedVoltage) : ((c3.current || 0) + (a.current || 0));
+
+    renderPortCard('c3', {
+      active: true,
+      power: mergedPower,
+      voltage: mergedVoltage,
+      current: mergedCurrent,
+      detailText: `${mergedVoltage.toFixed(1)}V / ${mergedCurrent.toFixed(1)}A (C3+A 合并)`,
+    });
+
+    renderPortCard('a', {
+      active: true,
+      power: mergedPower,
+      voltage: mergedVoltage,
+      current: mergedCurrent,
+      detailText: `已并入 C3 · C3 ${(c3.power || 0).toFixed(1)}W + A ${(a.power || 0).toFixed(1)}W`,
+      powerText: '并入',
+    });
+  } else {
+    renderPortCard('c3', c3);
+    renderPortCard('a', a);
+  }
+
+  renderPortCard('c1', portDataCache.c1);
+  renderPortCard('c2', portDataCache.c2);
+}
+
+function renderPortCard(port, data) {
+  const el = document.getElementById(`portdata-${port}`);
+  if (!el) return;
+
+  // v1.3.8：先把目标值算出来，与上次写入完全一致就整块跳过，
+  // 不碰 DOM 就不会触发样式重算（原来每条消息都无条件写一遍）
+  let pw, cls, dt;
+  if (!data) {
+    pw = '--'; cls = 'port-power zero'; dt = '未接入';
+  } else if (data.active && data.power > 0) {
+    pw = data.powerText || `${Number(data.power).toFixed(1)}W`;
+    cls = 'port-power';
+    dt = data.detailText || `${data.voltage}V / ${data.current}A`;
+  } else if (data.active) {
+    pw = '0W'; cls = 'port-power zero'; dt = data.detailText || `${data.voltage}V / 待机`;
+  } else {
+    pw = '--'; cls = 'port-power zero'; dt = '未接入';
+  }
+
+  const key = pw + '|' + cls + '|' + dt;
+  if (el.dataset.lastKey === key) return;
+  el.dataset.lastKey = key;
+
+  const powerEl = el.querySelector('.port-power');
+  const detailEl = el.querySelector('.port-detail');
+  powerEl.textContent = pw;
+  powerEl.className = cls;
+  detailEl.textContent = dt;
+
+  // Power bar
+  updatePowerBar(port, data ? (data.power || 0) : 0);
+}
+
+function updatePowerBar(port, power) {
+  const fill = document.getElementById(`bar-${port}`);
+  const card = document.getElementById(`port-${port}`);
+  if (!fill) return;
+
+  const cfg = POWER_LIMITS.ports[port] || { sceneMax: 100, hardMax: 120 };
+  const safePower = Math.max(0, Math.min(Number(power) || 0, cfg.hardMax));
+  const pct = Math.min(safePower / cfg.sceneMax, 1) * 100;
+
+  // v1.3.8：变化小于 0.5% 就不动宽度，否则 0.1W 的抖动会不停触发 0.5s 过渡
+  const lastPct = Number(fill.dataset.pct);
+  if (!Number.isFinite(lastPct) || Math.abs(lastPct - pct) >= 0.5) {
+    fill.dataset.pct = String(pct);
+    fill.style.width = pct + '%';
+  }
+  // Color: green <35%, amber <75%, red >=75%
+  const ratio = cfg.sceneMax > 0 ? (safePower / cfg.sceneMax) : 0;
+  const bg = ratio >= 0.75 ? 'var(--red)' : (ratio >= 0.35 ? 'var(--amber)' : 'var(--green)');
+  if (fill.dataset.bg !== bg) {
+    fill.dataset.bg = bg;
+    fill.style.background = bg;
+  }
+
+  // 超过场景上限时，不再拉长进度条，只增加高光提示
+  const shadow = safePower > cfg.sceneMax ? '0 0 10px rgba(248, 113, 113, 0.55)' : 'none';
+  if (fill.dataset.shadow !== shadow) {
+    fill.dataset.shadow = shadow;
+    fill.style.boxShadow = shadow;
+  }
+
+  if (card) {
+    const cls = ratio >= 0.75 ? 'power-high' : (ratio >= 0.35 ? 'power-mid' : (safePower > 0 ? 'power-low' : ''));
+    if (card.dataset.powerCls !== cls) {
+      card.dataset.powerCls = cls;
+      card.classList.remove('power-low', 'power-mid', 'power-high');
+      if (cls) card.classList.add(cls);
+    }
+  }
+}
+
+function updateTotalPower() {
+  let total = 0;
+  for (const p of Object.values(portDataCache)) {
+    if (p && p.power > 0) total += p.power;
+  }
+  const wrap = document.getElementById('totalPowerWrap');
+  const el = document.getElementById('totalPower');
+  const flowFill = document.getElementById('energyFlowFill');
+  const totalText = total > 0 ? `${total.toFixed(1)}W` : '0W';
+
+  const cfg = POWER_LIMITS.total;
+  const safeTotal = Math.max(0, Math.min(total, cfg.hardMax));
+  const level = Math.max(0, Math.min(safeTotal / cfg.sceneMax, 1));
+  const flowPct = total > 0 ? Math.max(4, level * 100) : 0;
+
+  // v1.3.8：整块总功率区域按一个 key 做脏检查。
+  // 原来每条消息都要写 4 个 CSS 变量 + 宽度 + 3 个 class，等于逼整棵子树重算样式。
+  const key = totalText + '|' + flowPct.toFixed(1) + '|' + level.toFixed(3)
+    + '|' + (safeTotal > cfg.sceneMax);
+  if (wrap && wrap.dataset.lastKey === key) return;
+  if (wrap) wrap.dataset.lastKey = key;
+
+  if (el) el.textContent = totalText;
+
+  if (flowFill) {
+    flowFill.style.width = `${flowPct.toFixed(1)}%`;
+    flowFill.style.boxShadow = safeTotal > cfg.sceneMax ? '0 0 16px rgba(248, 113, 113, 0.55)' : 'none';
+  }
+
+  if (!wrap) return;
+  wrap.classList.toggle('zero', total <= 0);
+  wrap.classList.toggle('active', total > 0);
+  wrap.classList.toggle('boost', total >= 55);
+
+  const flowSpeed = (2.4 - level * 1.8).toFixed(2);
+  const pulseSpeed = (2.6 - level * 2.0).toFixed(2);
+  const brightness = (0.55 + level * 0.9).toFixed(2);
+  const tailAlpha = (0.2 + level * 0.6).toFixed(2);
+
+  wrap.style.setProperty('--flow-speed', `${Math.max(0.45, Number(flowSpeed))}s`);
+  wrap.style.setProperty('--pulse-speed', `${Math.max(0.35, Number(pulseSpeed))}s`);
+  wrap.style.setProperty('--flow-bright', brightness);
+  wrap.style.setProperty('--tail-alpha', tailAlpha);
+}
+
+// ============================================================
+// History charts
+// ============================================================
+function initHistoryPanel() {
+  const dateEl = document.getElementById('historyDate');
+  const today = new Date().toISOString().slice(0, 10);
+  dateEl.innerHTML = `<option value="${today}">${today}</option>`;
+
+  document.getElementById('historyPort').addEventListener('change', () => loadHistoryData());
+  document.getElementById('historyMetric').addEventListener('change', () => loadHistoryData());
+  document.getElementById('historyGranularity').addEventListener('change', () => loadHistoryData());
+  dateEl.addEventListener('change', () => {
+    loadHistoryData();
+  });
+
+  loadHistoryDates().then(() => loadHistoryData());
+}
+
+async function loadHistoryDates() {
+  const data = await apiCall('GET', '/api/history/dates');
+  if (!data.ok || !Array.isArray(data.dates)) return;
+
+  const dateEl = document.getElementById('historyDate');
+  const prev = dateEl.value;
+  dateEl.innerHTML = data.dates.map(d => `<option value="${d}">${d}</option>`).join('');
+  if (prev && data.dates.includes(prev)) dateEl.value = prev;
+}
+
+async function loadHistoryData() {
+  const date = document.getElementById('historyDate').value;
+  const port = document.getElementById('historyPort').value;
+  const metric = document.getElementById('historyMetric').value;
+  const granularity = document.getElementById('historyGranularity').value;
+  if (!port || !metric || !granularity) return;
+
+  const data = await apiCall('GET', `/api/history?date=${encodeURIComponent(date || '')}&port=${encodeURIComponent(port)}&granularity=${encodeURIComponent(granularity)}`);
+  if (!data.ok) return;
+
+  const records = Array.isArray(data.records) ? data.records : [];
+  const labels = records.map(r => {
+    const ts = String(r.ts || '');
+    if (granularity === 'second') return ts.slice(11, 19);
+    if (granularity === 'minute') return ts.slice(11, 16);
+    if (granularity === 'hour') return `${ts.slice(11, 13)}:00`;
+    if (granularity === 'day') return ts;
+    if (granularity === 'month') return ts;
+    if (granularity === 'year') return ts;
+    return ts;
+  });
+  const metricName = {
+    power: '功率 (W)',
+    voltage: '电压 (V)',
+    current: '电流 (A)',
+  };
+  const granularityName = {
+    second: '秒',
+    minute: '分钟',
+    hour: '小时',
+    day: '天',
+    month: '月',
+    year: '年',
+  };
+  const metricColor = {
+    power: '#22c55e',
+    voltage: '#3b82f6',
+    current: '#f59e0b',
+  };
+
+  const isTotal = port === 'total';
+  const effectiveMetric = isTotal && metric !== 'power' ? 'power' : metric;
+  if (isTotal && metric !== 'power') {
+    document.getElementById('historyMetric').value = 'power';
+  }
+
+  const values = records.map(r => Number(r[effectiveMetric] || 0));
+  document.getElementById('historyChartTitle').textContent = `${metricName[effectiveMetric]} · ${port.toUpperCase()} · 按${granularityName[granularity]}${granularity === 'second' || granularity === 'minute' || granularity === 'hour' ? ` · ${date}` : ''}`;
+  renderSingleHistoryChart(labels, values, metricColor[effectiveMetric], metricName[effectiveMetric]);
+}
+
+function renderSingleHistoryChart(labels, values, color, label) {
+  const el = document.getElementById('historyChart');
+  if (!el || !window.Chart) return;
+
+  const maxV = values.length ? Math.max(...values) : 0;
+  const suggestedMax = maxV > 0 ? Number((maxV * 1.15).toFixed(2)) : 1;
+
+  if (!historyChart) {
+    historyChart = new Chart(el.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label,
+          data: values,
+          borderColor: color,
+          borderWidth: 2,
+          tension: 0.18,
+          pointRadius: 0,
+          pointHitRadius: 8,
+          fill: false,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        layout: { padding: { bottom: 8 } },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: { enabled: true },
+        },
+        scales: {
+          x: {
+            ticks: {
+              color: '#94a3b8',
+              maxTicksLimit: 7,
+              maxRotation: 0,
+              minRotation: 0,
+              autoSkip: true,
+              callback: function(value) {
+                const labelValue = this.getLabelForValue(value) || '';
+                if (labelValue.includes(':') && labelValue.length > 5) {
+                  return labelValue.slice(0, 5);
+                }
+                return labelValue;
+              },
+            },
+            grid: { color: '#2a2d3a' },
+          },
+          y: {
+            beginAtZero: true,
+            suggestedMax,
+            ticks: { color: '#94a3b8' },
+            grid: { color: '#2a2d3a' },
+          },
+        },
+      },
+    });
+    return;
+  }
+
+  historyChart.data.labels = labels;
+  historyChart.data.datasets[0].label = label;
+  historyChart.data.datasets[0].data = values;
+  historyChart.data.datasets[0].borderColor = color;
+  historyChart.options.scales.y.suggestedMax = suggestedMax;
+  historyChart.update('none');
+}
+
+// ============================================================
+// API calls
+// ============================================================
+async function apiCall(method, path, body) {
+  try {
+    const resp = await fetch(path, {
+      method,
+      headers: {'Content-Type': 'application/json'},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await resp.json();
+    if (!data.ok && data.error) {
+      showToast(data.error, 'error');
+    }
+    return data;
+  } catch (e) {
+    showToast('网络错误', 'error');
+    return {ok: false};
+  }
+}
+
+async function toggleConnection() {
+  if (connectionState === 'READY') {
+    await apiCall('POST', '/api/disconnect');
+    showToast('已断开连接', 'info');
+  } else if (connectionState === 'DISCONNECTED') {
+    updateConnectionState('CONNECTING');
+    const result = await apiCall('POST', '/api/connect');
+    if (result.ok) {
+      showToast('设备已连接', 'success');
+    }
+  }
+}
+
+async function setSetting(piid, value, btnEl) {
+  if (updatingFromServer) return;
+  haptic();
+
+  // Optimistic update: immediately switch UI
+  const prevSettings = {...settings};
+  if (btnEl && btnEl.classList.contains('seg-btn')) {
+    // Segmented button: activate clicked, deactivate siblings
+    const group = btnEl.parentElement;
+    group.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+    btnEl.classList.add('active');
+    btnEl.classList.add('sending');
+  }
+  settings[String(piid)] = value;
+
+  const result = await apiCall('POST', '/api/set', {piid, value});
+
+  if (!result.ok) {
+    // Rollback on failure
+    settings = prevSettings;
+    renderSettings();
+  } else {
+    // Remove sending state
+    if (btnEl) btnEl.classList.remove('sending');
+  }
+  // No success toast for settings — optimistic UI is enough
+}
+
+async function togglePort(port, isOn) {
+  if (updatingFromServer) return;
+  haptic();
+  const result = await apiCall('POST', '/api/port', {port, action: isOn ? 'on' : 'off'});
+  if (result.ok) {
+    showToast(`${port.toUpperCase()} 已${isOn ? '开启' : '关闭'}`, 'success');
+  }
+}
+
+async function setTimerPreset(port, minutes) {
+  haptic();
+  const result = await apiCall('POST', '/api/timer', {port, minutes});
+  if (result.ok) {
+    showToast(`${port.toUpperCase()} 倒计时 ${minutes} 分钟`, 'success');
+  }
+}
+
+async function setTimer(port) {
+  const input = document.getElementById(`timer-${port}`);
+  const minutes = parseInt(input.value) || 0;
+  if (minutes <= 0) return;
+  haptic();
+  const result = await apiCall('POST', '/api/timer', {port, minutes});
+  if (result.ok) {
+    showToast(`${port.toUpperCase()} 倒计时 ${minutes} 分钟`, 'success');
+    input.value = '';
+  }
+}
+
+async function refreshSettings() {
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('spinning');
+  btn.disabled = true;
+  const result = await apiCall('POST', '/api/refresh');
+  btn.classList.remove('spinning');
+  btn.disabled = false;
+  if (result.ok) {
+    showToast('已刷新', 'info');
+  }
+}
+
+// ============================================================
+// Toast notifications
+// ============================================================
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(100%)';
+    toast.style.transition = 'all 0.3s';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+// ============================================================
+// 对外控制通道（v1.3.8）
+// ------------------------------------------------------------
+// 桌面壳子（desktop/manager.py）在窗口隐藏/显示时通过 evaluate_js 调它，
+// 把整页画图彻底停掉 —— 收进托盘不等于停止渲染，这条通道就是干这个的。
+// 注意：不要和引导页的 window.__ctl 混用，那个只存在于 console_host.html。
+// ============================================================
+window.__ck = {
+  setPaused: function (v) {
+    const root = document.documentElement;
+    root.classList.toggle('viz-paused', !!v);
+    if (!v) {
+      // 恢复可见：补一次全量，避免停在隐藏期间的旧数值
+      dirtyPorts.add('c1'); dirtyPorts.add('c2');
+      dirtyPorts.add('c3'); dirtyPorts.add('a');
+      renderPortsDisplay();
+      updateTotalPower();
+      kickAnim();
+    } else {
+      clearTimeout(animTimer);
+      root.classList.add('viz-idle');
+    }
+  }
+};
+
+// 兜底：Python 那边万一没调到，页面自己也按可见性暂停
+document.addEventListener('visibilitychange', () => {
+  window.__ck.setPaused(document.visibilityState === 'hidden');
+});
+
+// ============================================================
+// Init
+// ============================================================
+window.addEventListener('load', () => {
+  connectWebSocket();
+  initHistoryPanel();
+  // Fetch initial status in case WS is slow
+  fetch('/api/status').then(r => r.json()).then(data => {
+    updateConnectionState(data.state);
+    if (data.settings) {
+      settings = data.settings;
+      renderSettings();
+    }
+  }).catch(() => {});
+});
+</script>
+</body>
+</html>
