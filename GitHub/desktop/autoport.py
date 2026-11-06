@@ -101,7 +101,6 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 _LOCK = threading.Lock()
 _RUN = threading.Lock()          # 自动 / 手动执行串行，避免同一时刻发两串命令
 _LOG = None
-_CONF = None                     # None = 还没从磁盘读过
 
 _STATE = {
     "enabled": True,
@@ -209,18 +208,20 @@ def load_conf() -> dict:
 
 
 def conf() -> dict:
-    global _CONF
-    if _CONF is None:
-        _CONF = load_conf()
-    return dict(_CONF)
+    """每次都从磁盘读，不缓存。
+
+    为什么放弃缓存（v1.6.0）：这个配置文件现在有**两个进程**会写——管理器改设置，
+    采集服务响应网页的 `/api/autoport`。缓存住就变成「网页改了、管理器还按旧值
+    执行」，界面上显示的开关和实际生效的对不上。文件不到 200 字节，一天读几千次
+    的成本远小于这种不一致。
+    """
+    return load_conf()
 
 
 def _write_conf(**changes) -> dict:
     """合并写回配置文件。**必须合并**：只写一个键会把别的设置冲掉。"""
-    global _CONF
     data = conf()
     data.update(changes)
-    _CONF = dict(data)
     try:
         CONF_FILE.parent.mkdir(parents=True, exist_ok=True)
         CONF_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -294,6 +295,67 @@ def set_scope(value) -> dict:
     return {**snapshot(), "ok": True}
 
 
+def public_state() -> dict:
+    """给网页 `/api/autoport` 读的配置快照。
+
+    这个函数会在**采集服务进程**里被调用，所以刻意只做两件事：读磁盘配置、
+    现算在不在时间窗内。**不碰 `_STATE`** —— 那里存的是「上次执行结果」，
+    只属于管理器进程，服务进程读到的会是一份空壳，拿它显示只会误导。
+
+    与 `snapshot()` 的分工：snapshot 给桌面浮层/托盘看（含执行进度），
+    public_state 给网页看（只有配置）。两者共用同一份 autoport.json。
+    """
+    cfg = load_conf()
+    return {
+        "ok": True,
+        "enabled": cfg["enabled"],
+        "start": cfg["start"],
+        "end": cfg["end"],
+        "ports": cfg["ports"],
+        "window": window_label(cfg),
+        "scope": scope_label(cfg["ports"]),
+        "inWindow": in_window(cfg=cfg),
+    }
+
+
+def save_settings(patch: dict) -> dict:
+    """网页上改「自动启动」的设置：**只落盘**，不触发执行、不改 `_STATE`。
+
+    为什么不复用 `set_enabled()`：那个函数在时间窗内会立刻起线程去开端口，
+    它服务的是「桌面浮层里手动拨开关」这个场景，而且会改写本进程的 _STATE。
+    网页这边只负责改配置，真正的执行仍然由管理器在启动时做——两个进程各管
+    一件事，不会同时抢 BLE。
+
+    返回最新的 public_state，前端拿到就能直接重绘，不用再拉一次。
+    """
+    if not isinstance(patch, dict):
+        return {**public_state(), "ok": False, "error": "请求格式不对"}
+
+    changes: dict = {}
+    if "enabled" in patch:
+        changes["enabled"] = bool(patch["enabled"])
+
+    if "start" in patch or "end" in patch:
+        cfg = conf()
+        s = _parse_hm(patch.get("start", cfg["start"]))
+        e = _parse_hm(patch.get("end", cfg["end"]))
+        if not s or not e:
+            return {**public_state(), "ok": False, "error": "时间格式不对，应该是 HH:MM"}
+        if _minutes(e) < _minutes(s):
+            return {**public_state(), "ok": False, "error": "结束时间不能早于开始时间"}
+        changes["start"], changes["end"] = s, e
+
+    if "ports" in patch:
+        changes["ports"] = _normalize_scope(patch["ports"])
+
+    if not changes:
+        return public_state()
+
+    _write_conf(**changes)
+    log("[自动开端口] 设置已从控制台更新：" + "、".join(f"{k}={v}" for k, v in changes.items()))
+    return public_state()
+
+
 def _refresh_idle_message() -> None:
     """设置变化后，把「还没到点/已关闭」这类**静态提示**同步成新文案。
 
@@ -349,12 +411,13 @@ def window_label(cfg: dict | None = None) -> str:
     return f"{c['start']}–{c['end']}"
 
 
-def in_window(now: datetime | None = None) -> bool:
+def in_window(now: datetime | None = None, cfg: dict | None = None) -> bool:
     """是否落在所设时间窗内：start（含）– end+1 分钟（不含）。
 
     秒不单独处理：12:00:59 的 cur_min 仍是 720，落在窗口内；12:01:00 起 cur_min=721 出去。
+    cfg 可显式传入，避免调用方已经读过一次配置还要再读一遍盘。
     """
-    c = conf()
+    c = cfg or conf()
     t = (now or datetime.now()).time()
     cur_min = t.hour * 60 + t.minute
     start = _minutes(c["start"])

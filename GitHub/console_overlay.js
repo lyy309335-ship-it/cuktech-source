@@ -92,31 +92,9 @@
     '.ckt-sw.on::after{transform:translateX(18px)}',
     '.ckt-sw:disabled{opacity:.45;cursor:not-allowed}',
 
-    // 自动开启设置的下拉设置区（时间窗 + 端口范围）
-    '.ckt-cfg{margin:1px 0 9px;padding:8px 9px;border-radius:9px;',
-    'background:rgba(255,255,255,.028);border:1px solid rgba(255,255,255,.055)}',
-    '.ckt-cfg-line{display:flex;align-items:center;gap:6px}',
-    '.ckt-cfg-line+.ckt-cfg-line{margin-top:7px}',
-    '.ckt-lb{flex:0 0 auto;width:34px;font-size:10.5px;color:#7c8497;white-space:nowrap}',
-    '.ckt-time{width:65px;height:22px;padding:0 3px;border-radius:6px;border:1px solid rgba(255,255,255,.12);',
-    'background:rgba(255,255,255,.05);color:#dfe5f0;font:11px/1 inherit;color-scheme:dark;outline:none;',
-    'font-variant-numeric:tabular-nums}',
-    '.ckt-time:focus{border-color:rgba(110,231,214,.55);background:rgba(110,231,214,.06)}',
-    '.ckt-time::-webkit-calendar-picker-indicator{opacity:.45;cursor:pointer;width:9px;height:9px;margin-left:1px}',
-    '.ckt-time::-webkit-calendar-picker-indicator:hover{opacity:.85}',
-    '.ckt-dash{flex:0 0 auto;color:#5b6274;font-size:11px}',
-    '.ckt-seg{display:flex;flex:0 0 auto;border-radius:7px;overflow:hidden;border:1px solid rgba(255,255,255,.12)}',
-    '.ckt-seg-b{height:21px;padding:0 7px;border:none;background:transparent;color:#8b93a6;',
-    'font:10.5px/1 inherit;cursor:pointer;transition:.15s;white-space:nowrap}',
-    '.ckt-seg-b+.ckt-seg-b{border-left:1px solid rgba(255,255,255,.1)}',
-    '.ckt-seg-b:hover:not(.on){background:rgba(255,255,255,.06);color:#cbd5e1}',
-    '.ckt-seg-b.on{background:rgba(110,231,214,.16);color:#6ee7d6}',
-    '.ckt-seg-b:disabled{opacity:.5;cursor:not-allowed}',
-    '.ckt-sel{height:22px;padding:0 2px;border-radius:6px;border:1px solid rgba(255,255,255,.12);',
-    'background:rgba(255,255,255,.05);color:#dfe5f0;font:11px/1 inherit;color-scheme:dark;',
-    'outline:none;cursor:pointer;flex:0 0 auto}',
-    '.ckt-sel:focus{border-color:rgba(110,231,214,.55)}',
-    '.ckt-sel.off{display:none}',
+    // v1.6.0：「自动启动」连同它的时间窗/端口范围搬到了控制台网页的
+    // 「设备设置 > 场景设置」，浮层里的 .ckt-cfg / .ckt-time / .ckt-seg / .ckt-sel
+    // 一并删掉了，别再加回来 —— 同一个设置出现两个入口，用户改哪边都像没生效。
 
     '.ckt-btns{display:flex;gap:7px;margin-top:11px}',
     '.ckt-btn{flex:1;height:31px;border-radius:9px;border:1px solid rgba(255,255,255,.10);',
@@ -125,6 +103,23 @@
     '.ckt-btn.ckt-danger{color:#f3b0b0;border-color:rgba(239,68,68,.34)}',
     '.ckt-btn.ckt-danger:hover{background:rgba(239,68,68,.18);border-color:rgba(239,68,68,.45);color:#fca5a5}',
     '.ckt-foot{margin-top:10px;font-size:10px;color:#575e70;line-height:1.6;word-break:break-all;overflow:hidden}',
+
+    // v1.7.0 版本更新。单独包一层是因为它下面可能多一条进度条，
+    // 直接塞 .ckt-row 会破坏 .ckt-row+.ckt-row 那条分隔线。
+    '.ckt-upbox{border-top:1px solid rgba(255,255,255,.055)}',
+    '.ckt-prog{display:none;height:4px;margin:0 2px 9px;border-radius:2px;',
+    'background:rgba(255,255,255,.08);overflow:hidden}',
+    '.ckt-prog.on{display:block}',
+    '.ckt-prog i{display:block;height:100%;width:0;border-radius:2px;background:#6ee7d6;transition:width .25s}',
+    '.ckt-mini{flex:0 0 auto;height:24px;padding:0 10px;border-radius:7px;white-space:nowrap;',
+    'border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#8b93a6;',
+    'font:11.5px/1 inherit;cursor:pointer;transition:.15s}',
+    '.ckt-mini:hover{background:rgba(255,255,255,.1);color:#cbd5e1}',
+    '.ckt-mini.hot{border-color:rgba(110,231,214,.45);background:rgba(110,231,214,.14);color:#6ee7d6}',
+    '.ckt-mini.hot:hover{background:rgba(110,231,214,.22)}',
+    '.ckt-mini:disabled{opacity:.5;cursor:not-allowed}',
+    '.ckt-up-hi{color:#6ee7d6!important}',
+    '.ckt-up-err{color:#f09696!important}',
     '.ckt-toast{position:fixed;right:16px;bottom:104px;z-index:' + Z + ';padding:7px 12px;border-radius:9px;',
     'background:rgba(23,26,33,.95);border:1px solid rgba(255,255,255,.12);color:#dfe5f0;',
     'font:12px/1.4 inherit;opacity:0;transform:translateY(6px);transition:.2s;pointer-events:none;max-width:280px}',
@@ -201,70 +196,121 @@
   var swWidget = row('桌面卡片', '常驻桌面的小窗，关掉可省内存');
   var swAutostart = row('开机自启', '登录系统后自动在托盘运行');
 
-  // 自动开启设置：在所设时间窗内启动时检查所选端口，有没开的就开（规则在 autoport.py）
-  var autoRow = (function () {
+  // v1.6.0：「自动开启设置」整块搬去了控制台网页的「设备设置 > 场景设置」，
+  // 浮层里只留纯运行管理（服务 / 卡片 / 开机自启）。
+  // 规则实现没动，还在 desktop/autoport.py，只是改了入口 —— 别再在这里加回来，
+  // 同一个设置有两个入口，用户改哪边都像没生效。
+
+  // ---------------- 版本更新（v1.7.0）
+  // 进度靠 openPanel 里已有的 2 秒 refresh 带出来，这里不另起轮询。
+  var up = (function () {
+    var box = h('div', 'ckt-upbox');
     var r = h('div', 'ckt-row');
     var txt = h('div', 'ckt-txt');
-    txt.appendChild(h('div', 'ckt-t1', '自动开启设置'));
-    var sub = h('div', 'ckt-t2', '在所设时间窗内启动时检查所选端口，有未开启的即开启');
-    txt.appendChild(sub);
+    txt.appendChild(h('div', 'ckt-t1', '版本更新'));
+    var t2 = h('div', 'ckt-t2', '当前 v--');
+    txt.appendChild(t2);
     r.appendChild(txt);
-    var sw = h('button', 'ckt-sw');
-    r.appendChild(sw);
-    panel.appendChild(r);
-    return { sub: sub, sw: sw };
-  })();
-  var autoTxt = autoRow.sub;
-  var autoSw = autoRow.sw;
-
-  // 自动开启设置的下拉区：① 时间窗 ② 端口范围（全部 / 单口）
-  // 两行都「改完即存」，不需要额外保存按钮：这功能本身就是低频设置，
-  // 多一个保存按钮反而容易忘了点，导致界面显示的设置和实际生效的不一致。
-  var autoCfg = (function () {
-    var box = h('div', 'ckt-cfg');
-
-    // ① 时间窗
-    var lineT = h('div', 'ckt-cfg-line');
-    lineT.appendChild(h('span', 'ckt-lb', '时间窗'));
-    var tStart = document.createElement('input');
-    tStart.type = 'time';
-    tStart.className = 'ckt-time';
-    tStart.value = '07:00';
-    tStart.title = '开始时间（含）';
-    var tEnd = document.createElement('input');
-    tEnd.type = 'time';
-    tEnd.className = 'ckt-time';
-    tEnd.value = '12:00';
-    tEnd.title = '结束时间（含这一整分钟）';
-    lineT.appendChild(tStart);
-    lineT.appendChild(h('span', 'ckt-dash', '\u2014'));
-    lineT.appendChild(tEnd);
-    box.appendChild(lineT);
-
-    // ② 端口范围：分段按钮明确区分「全部」和「指定单口」两种模式
-    var lineP = h('div', 'ckt-cfg-line');
-    lineP.appendChild(h('span', 'ckt-lb', '端口'));
-    var seg = h('div', 'ckt-seg');
-    var bAll = h('button', 'ckt-seg-b on', '全部充电口');
-    var bOne = h('button', 'ckt-seg-b', '指定单口');
-    seg.appendChild(bAll);
-    seg.appendChild(bOne);
-    lineP.appendChild(seg);
-    var sel = document.createElement('select');
-    sel.className = 'ckt-sel off';
-    sel.title = '选择要处理的充电口';
-    [['c1', 'C1'], ['c2', 'C2'], ['c3', 'C3'], ['a', 'A']].forEach(function (p) {
-      var o = document.createElement('option');
-      o.value = p[0];
-      o.textContent = p[1];
-      sel.appendChild(o);
-    });
-    lineP.appendChild(sel);
-    box.appendChild(lineP);
-
+    var act = h('button', 'ckt-mini', '检查');
+    r.appendChild(act);
+    var prog = h('div', 'ckt-prog');
+    var fill = h('i');
+    prog.appendChild(fill);
+    box.appendChild(r);
+    box.appendChild(prog);
     panel.appendChild(box);
-    return { box: box, tStart: tStart, tEnd: tEnd, bAll: bAll, bOne: bOne, sel: sel };
+    return { t2: t2, act: act, prog: prog, fill: fill };
   })();
+  var lastUpdate = null;
+
+  function paintUpdate(u) {
+    if (!u) { return; }
+    lastUpdate = u;
+    var ph = u.phase || 'idle';
+    var cur = 'v' + (u.current || '--');
+    up.t2.className = 'ckt-t2';
+    up.t2.title = '';
+    up.act.className = 'ckt-mini';
+    up.act.disabled = false;
+    up.prog.classList.remove('on');
+
+    if (ph === 'disabled') {
+      // 没配更新源（源码运行 / 自己编译的包）：不给假按钮
+      up.t2.textContent = cur + ' · 未配置更新源';
+      up.act.textContent = '检查';
+      up.act.disabled = true;
+    } else if (ph === 'checking') {
+      up.t2.textContent = cur + ' · 正在检查…';
+      up.act.textContent = '检查中';
+      up.act.disabled = true;
+    } else if (ph === 'uptodate') {
+      up.t2.textContent = cur + ' · 已是最新版本';
+      up.act.textContent = '检查';
+    } else if (ph === 'available') {
+      // 当前版本在标题栏 already 有 badge，这里只报新版本 + 第一条改动摘要
+      var n0 = (u.notes && u.notes.length) ? u.notes[0] : '';
+      up.t2.textContent = '新版本 v' + (u.latest || '') + (n0 ? ' · ' + n0 : ' 可用');
+      up.t2.className = 'ckt-t2 ckt-up-hi';
+      up.t2.title = (u.notes || []).join('\n');
+      up.act.textContent = '立即更新';
+      up.act.className = 'ckt-mini hot';
+    } else if (ph === 'downloading') {
+      var pct = Math.round((u.progress || 0) * 100);
+      up.t2.textContent = '正在下载安装包… ' + pct + '%';
+      up.t2.className = 'ckt-t2 ckt-up-hi';
+      up.act.textContent = '下载中';
+      up.act.disabled = true;
+      up.prog.classList.add('on');
+      up.fill.style.width = pct + '%';
+    } else if (ph === 'ready' || ph === 'installing') {
+      up.t2.textContent = '正在安装，程序即将重启…';
+      up.t2.className = 'ckt-t2 ckt-up-hi';
+      up.act.textContent = '安装中';
+      up.act.disabled = true;
+      up.prog.classList.add('on');
+      up.fill.style.width = '100%';
+    } else if (ph === 'error') {
+      up.t2.textContent = u.message || '检查更新失败';
+      up.t2.className = 'ckt-t2 ckt-up-err';
+      up.act.textContent = '重试';
+    } else {
+      up.t2.textContent = cur + ' · ' + (u.message || '尚未检查');
+      up.act.textContent = '检查';
+    }
+  }
+
+  up.act.onclick = function () {
+    var a = api();
+    if (!a) { say('请在桌面版里更新'); return; }
+    var ph = lastUpdate ? lastUpdate.phase : 'idle';
+    if (ph === 'available') {
+      up.act.disabled = true;
+      up.act.textContent = '准备中…';
+      a.install_update().then(function (u) {
+        paintUpdate(u);
+        if (u && u.phase === 'error') { say(u.message || '更新失败'); }
+      }).catch(function () {
+        say('更新启动失败，请看 manager.log');
+        up.act.disabled = false;
+        up.act.textContent = '立即更新';
+      });
+      return;
+    }
+    up.act.disabled = true;
+    up.act.textContent = '检查中';
+    a.check_update(true).then(function (u) {
+      paintUpdate(u);
+      var p = u && u.phase;
+      if (p === 'uptodate') { say('已是最新版本'); }
+      else if (p === 'available') { say('发现新版本 v' + u.latest); }
+      else if (p === 'error') { say(u.message || '检查失败'); }
+      else if (p === 'disabled') { say('这个版本没配置更新源'); }
+    }).catch(function () {
+      say('检查失败，请看 manager.log');
+      up.act.disabled = false;
+      up.act.textContent = '检查';
+    });
+  };
 
   var btns = h('div', 'ckt-btns');
   var btnData = h('button', 'ckt-btn', '数据目录');
@@ -296,92 +342,10 @@
     toast._t = setTimeout(function () { toast.classList.remove('show'); }, 2200);
   }
 
-  function paintAuto(ap) {
-    if (!ap) { return; }
-    var ph = ap.phase || 'idle';
-    autoSw.classList.toggle('on', !!ap.enabled);
-    if (ap.message) { autoTxt.textContent = ap.message; }
-    autoTxt.style.color = ph === 'error' ? '#f09696' : (ph === 'done' ? '#8fd9cf' : '#6c7488');
-    paintAutoCfg(ap);
-  }
-
-  // 把后端保存的时间窗 / 端口范围回填到控件上。
-  // 只在「值确实不一样」时才写，避免每秒轮询把用户正在挑的时间冲掉。
-  function paintAutoCfg(ap) {
-    if (!ap) { return; }
-    var active = document.activeElement;
-    if (ap.start && active !== autoCfg.tStart && autoCfg.tStart.value !== ap.start) {
-      autoCfg.tStart.value = ap.start;
-    }
-    if (ap.end && active !== autoCfg.tEnd && autoCfg.tEnd.value !== ap.end) {
-      autoCfg.tEnd.value = ap.end;
-    }
-    var one = !!ap.ports && ap.ports !== 'all';
-    autoCfg.bAll.classList.toggle('on', !one);
-    autoCfg.bOne.classList.toggle('on', one);
-    autoCfg.sel.classList.toggle('off', !one);
-    if (one && autoCfg.sel.value !== ap.ports) { autoCfg.sel.value = ap.ports; }
-  }
-
-  // 改设置 = 立刻存。没有「保存」按钮：这功能本身是低频设置，
-  // 多一个按钮反而容易漏点，界面显示的和实际生效的就会对不上。
-  var cfgBusy = false;
-
-  function saveWindow() {
-    var a = api();
-    if (!a || cfgBusy) { return; }
-    var s = autoCfg.tStart.value;
-    var e = autoCfg.tEnd.value;
-    if (!s || !e) { return; }
-    cfgBusy = true;
-    a.set_auto_port_window(s, e).then(function (ap) {
-      paintAuto(ap);
-      if (ap && ap.ok === false) {
-        say(ap.error || '时间窗没保存');
-        if (ap.start) { autoCfg.tStart.value = ap.start; }
-        if (ap.end) { autoCfg.tEnd.value = ap.end; }
-        return;
-      }
-      say('时间窗已改为 ' + ((ap && ap.window) || (s + '–' + e)));
-    }).catch(function () {
-      say('时间窗保存失败，请看 manager.log');
-    }).then(function () { cfgBusy = false; });
-  }
-
-  function saveScope(scope) {
-    var a = api();
-    if (!a || cfgBusy) { return; }
-    cfgBusy = true;
-    autoCfg.bAll.disabled = true;
-    autoCfg.bOne.disabled = true;
-    autoCfg.sel.disabled = true;
-    a.set_auto_port_ports(scope).then(function (ap) {
-      paintAuto(ap);
-      say('端口范围：' + ((ap && ap.scope) || scope));
-    }).catch(function () {
-      say('端口范围保存失败，请看 manager.log');
-    }).then(function () {
-      cfgBusy = false;
-      autoCfg.bAll.disabled = false;
-      autoCfg.bOne.disabled = false;
-      autoCfg.sel.disabled = false;
-    });
-  }
-
-  autoCfg.tStart.addEventListener('change', saveWindow);
-  autoCfg.tEnd.addEventListener('change', saveWindow);
-  autoCfg.bAll.onclick = function () {
-    if (autoCfg.bAll.classList.contains('on')) { return; }   // 已经是全部模式，不用重复存
-    saveScope('all');
-  };
-  autoCfg.bOne.onclick = function () {
-    // 先切界面状态再存：下拉框得先亮出来，用户才知道选中了哪个口
-    autoCfg.bAll.classList.remove('on');
-    autoCfg.bOne.classList.add('on');
-    autoCfg.sel.classList.remove('off');
-    saveScope(autoCfg.sel.value || 'c1');
-  };
-  autoCfg.sel.onchange = function () { saveScope(autoCfg.sel.value); };
+  // v1.6.0：原来这里有 paintAuto / paintAutoCfg / saveWindow / saveScope，
+  // 负责浮层里「自动开启设置」的开关、时间窗、端口范围。
+  // 这块整建制搬去了控制台网页（web/index.html → 设备设置 → 场景设置），
+  // 编辑逻辑也在那边用 fetch('/api/autoport') 实现，这里不再保留副本。
 
   function paint(s) {
     if (!s) { return; }
@@ -398,7 +362,7 @@
     swWidget.classList.toggle('on', !!s.widgetRunning);
     swAutostart.classList.toggle('on', !!s.autostart);
     if (s.dataDir) { foot.textContent = '数据目录：' + s.dataDir; }
-    paintAuto(s.autoPort);
+    paintUpdate(s.update);
   }
 
   function refresh() {
@@ -427,26 +391,6 @@
 
   swService.onclick = function () { toggle(swService, 'set_service', '采集服务'); };
   swWidget.onclick = function () { toggle(swWidget, 'set_widget', '桌面卡片'); };
-
-  autoSw.onclick = function () {
-    var a = api();
-    if (!a || busy) { return; }
-    busy = true;
-    autoSw.disabled = true;
-    var want = !autoSw.classList.contains('on');
-    a.set_auto_port(want).then(function (s) {
-      paint(s);
-      say(want ? '自动开启设置已开启' : '自动开启设置已关闭');
-      // 开启时若在时间窗内会立刻补做一次，3 秒后再拉一次拿结果
-      if (want) { setTimeout(refresh, 3000); }
-    }).catch(function () {
-      say('切换失败，请看日志');
-    }).then(function () {
-      busy = false;
-      autoSw.disabled = false;
-    });
-  };
-
   swAutostart.onclick = function () { toggle(swAutostart, 'set_autostart', '开机自启'); };
 
   btnData.onclick = function () {
@@ -546,12 +490,11 @@
     paint({
       serviceReady: true, serviceRunning: true, total: 45.2,
       widgetRunning: true, autostart: false,
-      version: '1.3.0',
+      version: '1.7.0',
       dataDir: 'C:\\Users\\xy309\\AppData\\Local\\CUKTECH\\data',
-      autoPort: {
-        enabled: true, phase: 'skipped', start: '07:00', end: '12:00', ports: 'all',
-        window: '07:00–12:00', scope: '全部充电口', inWindow: false,
-        message: '不在 07:00–12:00 时段（现在 21:04:59），本次不执行'
+      update: {
+        phase: 'available', current: '1.7.0', latest: '1.7.1',
+        progress: 0, notes: ['修复窄窗口下设置项错位'], message: '发现新版本 v1.7.1'
       }
     });
     openPanel(true);

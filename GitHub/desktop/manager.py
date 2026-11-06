@@ -35,7 +35,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import autoport, autostart, credentials, paths
+from . import autoport, autostart, credentials, paths, updater
 from .icon import bolt_icon
 from .version import VERSION
 
@@ -263,6 +263,18 @@ class Bridge:
         time.sleep(0.3)
         return autoport.snapshot()
 
+    # --- 版本更新
+    def check_update(self, force=True):
+        """查一次更新。force=False 时受 24 小时节流约束。"""
+        updater.set_logger(log)
+        return updater.check(force=bool(force))
+
+    def install_update(self):
+        """下载并安装（后台线程跑，进度靠 get_state 轮询）。"""
+        updater.set_logger(log)
+        updater.set_quit_callback(lambda: threading.Thread(target=self._app.quit, daemon=True).start())
+        return updater.start_install()
+
     # --- 窗口
     def open_console(self):
         """亮出内部控制台窗口（不跳浏览器）。"""
@@ -386,6 +398,8 @@ class Manager:
             "consoleState": self._console_state,
             # 自动开端口（时间窗 / 端口范围可配，启动时检查一次）的当前状态，给浮层显示
             "autoPort": autoport.snapshot(),
+            # 版本更新状态（查清单 / 下载 / 安装的进度都在这里）
+            "update": updater.snapshot(),
         }
 
     # --- 操作
@@ -788,6 +802,32 @@ class Manager:
     def _autostart_text(self, _item=None):
         return ("● " if autostart.is_enabled() else "○ ") + "开机自启"
 
+    def _update_text(self, _item=None):
+        """托盘里的更新项文字：有新版时直接写在菜单上，不用点进去才知道。"""
+        s = updater.snapshot()
+        phase = s.get("phase")
+        if phase == "available":
+            return f"↑ 有新版本 v{s.get('latest')}…"
+        if phase == "downloading":
+            return f"↓ 正在下载 {int(float(s.get('progress') or 0) * 100)}%…"
+        if phase == "ready":
+            return "正在准备安装…"
+        if phase == "installing":
+            return "正在安装，即将重启…"
+        if phase == "checking":
+            return "正在检查更新…"
+        return "检查更新…"
+
+    def _open_update(self):
+        """点更新项 = 打开运行管理浮层（版本、说明、按钮都在那儿，菜单里放不下）。"""
+        self.show_console()
+        threading.Thread(target=self.open_overlay, daemon=True).start()
+        if updater.snapshot().get("phase") not in (
+            "available", "downloading", "ready", "installing"
+        ):
+            updater.set_logger(log)
+            updater.start_check(force=True)
+
     def sync_tray(self) -> None:
         try:
             if not self.tray_icon:
@@ -822,6 +862,8 @@ class Manager:
                 Menu.SEPARATOR,
                 MenuItem(self._service_text, lambda: self.set_service(not self.service.alive())),
                 MenuItem(self._autostart_text, lambda: self.set_autostart(not autostart.is_enabled())),
+                Menu.SEPARATOR,
+                MenuItem(self._update_text, lambda: self._open_update()),
                 Menu.SEPARATOR,
                 MenuItem("重新加载控制台", lambda: self.reload_console()),
                 MenuItem("打开数据目录", lambda: self._open_dir(paths.data_dir())),
@@ -947,6 +989,14 @@ class Manager:
 
         setup_webview_log()
         setup_remote_debugging(webview)
+        # 更新模块：日志走这里（独立进程 --update-runner 会退回写 updater.log）
+        updater.set_logger(log)
+        updater.set_quit_callback(
+            lambda: threading.Thread(target=self.quit, daemon=True).start()
+        )
+        result = updater.take_install_result()
+        if result:
+            log(f"上次更新结果：{'成功' if result.get('ok') else '失败'} {result.get('detail', '')}")
         # 凭据缺失就先让用户填：否则采集服务起来只会一直连不上，
         # 用户看到的是「软件坏了」，而不是「还差一步配置」。
         self._ensure_credentials()
@@ -963,6 +1013,8 @@ class Manager:
         self._build_tray()
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
         threading.Thread(target=self._supervise, daemon=True).start()
+        # 40 秒后再查更新：启动这一刻在连 BLE、等 8080 就绪，别抢时间
+        updater.start_check_later(40.0)
 
         # 服务一般 3~5 秒就把 8080 挂起来；等得到就直接开控制台，
         # 等不到（蓝牙适配器异常等）才退回本地引导页，那时才用得到导航。

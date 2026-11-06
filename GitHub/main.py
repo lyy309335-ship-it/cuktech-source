@@ -1,12 +1,14 @@
 """CUKTECH 桌面版 · 统一入口。
 
-同一个 exe 承担四个角色，用命令行参数区分，安装包里只有一个可执行文件：
+同一个 exe 承担五个角色，用命令行参数区分，安装包里只有一个可执行文件：
 
     CUKTECH.exe                管理器：托盘 + 内部控制台窗口 + 运行管理窗口 + 监管子进程（单实例）
     CUKTECH.exe --silent       同上，但启动时不弹窗口（开机自启用这个）
     CUKTECH.exe --service      采集服务：BLE 后台 + 本地 Web API（127.0.0.1:8080）
     CUKTECH.exe --widget       桌面卡片：贴在桌面上的那块小窗
     CUKTECH.exe --collect      凭据导入向导：填 MAC / TOKEN / BLE KEY，跑完即退
+    CUKTECH.exe --update-runner <setup.exe> [sha256]
+                               更新进程：等管理器退出后静默覆盖安装，见 desktop/updater.py
 
 为什么不合成一个进程：采集走 asyncio + BLE 长连接，界面走 WinForms 消息循环，
 放一起任何一边卡住都会拖死另一边；分开后卡片崩了采集还在，采集崩了界面还在。
@@ -96,6 +98,25 @@ def run_collect() -> None:
         sys.exit(code)
 
 
+def run_update_runner(argv: list[str]) -> None:
+    """更新进程：等管理器退出 → 二次校验 → 静默覆盖安装。
+
+    为什么要单独占一个进程：`installer.do_install()` 第一步就是
+    `taskkill /IM CUKTECH.exe`，让管理器「自己杀自己」会留下 WebView2 孤儿进程占住
+    `_internal` 里的 dll，而清理旧文件是 `except OSError: pass` —— 被占的文件被跳过，
+    结果新旧文件混装。所以必须是「管理器先退干净，外部进程再装」。
+    """
+    from desktop import updater
+
+    rest = argv[argv.index("--update-runner") + 1:]
+    setup = rest[0] if rest else ""
+    sha = rest[1] if len(rest) > 1 else ""
+    if not setup:
+        print("用法：CUKTECH.exe --update-runner <setup.exe> [sha256]", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(updater.run_runner(setup, sha))
+
+
 def _release_single_instance() -> None:
     """提前放掉单实例互斥量。
 
@@ -155,6 +176,8 @@ def main() -> None:
         run_widget()
     elif "--collect" in argv:
         run_collect()
+    elif "--update-runner" in argv:
+        run_update_runner(argv)
     else:
         run_manager(silent="--silent" in argv)
 

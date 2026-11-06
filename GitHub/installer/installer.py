@@ -32,7 +32,7 @@ CHANGELOG_NAME = "版本更新说明.md"
 # 构建时由 build_installer.py 用 desktop/version.py 的值覆盖（唯一来源），
 # 这里的值只是「直接手跑 installer.py」时的兜底 —— 但它必须跟版本号一起改，
 # 否则兜底路径会写出一个「装完显示旧版本」的安装器（v1.4.1 之前一直停在 1.3.0）。
-VERSION = "1.5.0"
+VERSION = "1.7.0"
 PUBLISHER = "CUKTECH Desktop"
 
 # 不能只信环境变量：从某些宿主（服务、计划任务、精简 shell）启动时
@@ -197,7 +197,7 @@ def set_autostart(enable: bool, exe: Path) -> None:
     try:
         with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
             if enable:
-                winreg.SetValueEx(k, APP_NAME, 0, winreg.REG_SZ, f'"{exe}" --silent')
+                winreg.SetValueEx(k, APP_NAME, 0, winreg.REG_SZ, f'"{exe}" --manager --silent')
             else:
                 try:
                     winreg.DeleteValue(k, APP_NAME)
@@ -209,6 +209,27 @@ def set_autostart(enable: bool, exe: Path) -> None:
 
 def is_installed() -> bool:
     return (APP_DIR / APP_EXE).is_file()
+
+
+def has_desktop_shortcut() -> bool:
+    try:
+        return (DESKTOP / f"{APP_NAME}.lnk").is_file()
+    except OSError:
+        return False
+
+
+def autostart_enabled() -> bool:
+    """读现有的开机自启状态。和 set_autostart 写的是同一个 Run 值。"""
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ) as k:
+            value, _ = winreg.QueryValueEx(k, APP_NAME)
+            return bool(value)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
 
 
 def dir_size_kb(path: Path) -> int:
@@ -554,7 +575,16 @@ def main() -> None:
         return
 
     if silent:
-        do_install(create_desktop=True, autostart=True)
+        # 覆盖安装（用户点「立即更新」走的也是这条）不能把用户的选择改回去。
+        # 以前这里无条件 autostart=True / create_desktop=True，实测有两个副作用：
+        #   ① 用户手动关掉的「开机自启」，更新一次又被悄悄打开；
+        #   ② 用户删掉的桌面快捷方式，更新一次又冒出来。
+        # 改成：只有首次安装才用默认值，之后一律沿用现状。
+        first_install = not is_installed()
+        do_install(
+            create_desktop=True if first_install else has_desktop_shortcut(),
+            autostart=True if first_install else autostart_enabled(),
+        )
         return
     run_gui(uninstall_mode=False)
 

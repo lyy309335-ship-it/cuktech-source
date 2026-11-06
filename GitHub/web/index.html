@@ -600,6 +600,79 @@ body {
   flex-shrink: 0;
 }
 
+/* ========================================
+   Settings section (v1.6.0)
+   分组标题：右侧拖一条细线，把一个卡片里的设置分成几块，
+   比再加一层卡片轻，也不会把行高撑开
+   ======================================== */
+.setting-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.4px;
+  margin: 2px 0 4px;
+}
+.setting-section::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--card-border);
+}
+.setting-section + .setting-row { padding-top: 6px; }
+
+/* 带副标题的设置项（自动启动）：标题+说明在左，开关在右 */
+.setting-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.setting-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+
+/* 自动启动的二级配置：跟着开关走，关掉就整块收起。
+   2026-11-06 改：不用自定义的 .auto-line（flex + 百分比宽）了，直接用标准
+   .setting-row 承载 —— 窄窗口（≤480px）下 .seg-group 会变成 width:100% 的网格，
+   嵌在自定义 flex 行里会跟标签互相挤，实测就是「行占着高度、内容跑到卡片外面」。
+   现在这两行跟场景模式、息屏时间是同一套结构，窄窗口行为完全一致。 */
+.setting-sub { display: none; }
+.setting-sub.open { display: block; }
+.sub-row { padding: 8px 0; }
+.sub-label {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.time-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.time-input {
+  width: 90px;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color-scheme: dark;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.time-input:focus { border-color: var(--primary); }
+.time-dash { color: var(--text-dim); font-size: 13px; }
+
 /* Segmented control */
 .seg-group {
   display: flex;
@@ -974,6 +1047,9 @@ html.viz-paused *::after {
     <div class="card">
       <div class="card-title">设备设置</div>
 
+      <!-- 场景设置 -->
+      <div class="setting-section">场景设置</div>
+
       <!-- Scene Mode -->
       <div class="setting-row">
         <span class="setting-label">场景模式</span>
@@ -982,6 +1058,42 @@ html.viz-paused *::after {
           <button class="seg-btn" data-piid="5" data-value="2" onclick="setSetting(5,2,this)">数码生态</button>
           <button class="seg-btn" data-piid="5" data-value="3" onclick="setSetting(5,3,this)">单口</button>
           <button class="seg-btn" data-piid="5" data-value="4" onclick="setSetting(5,4,this)">均衡</button>
+        </div>
+      </div>
+
+      <!-- 自动启动（v1.6.0：从运行管理浮层搬来这里） -->
+      <div class="setting-row">
+        <div class="setting-main">
+          <span class="setting-label">自动启动</span>
+          <span class="setting-desc" id="autostart-desc">读取中…</span>
+        </div>
+        <div class="toggle-wrap">
+          <label class="toggle">
+            <input type="checkbox" id="toggle-autostart" onchange="setAutoStartEnabled(this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-sub" id="autostart-cfg">
+        <div class="setting-row sub-row">
+          <span class="setting-label sub-label">时间窗</span>
+          <div class="time-range">
+            <input type="time" class="time-input" id="autostart-start" title="开始时间（含）"
+                   onchange="saveAutoStartWindow()">
+            <span class="time-dash">—</span>
+            <input type="time" class="time-input" id="autostart-end" title="结束时间（含这一整分钟）"
+                   onchange="saveAutoStartWindow()">
+          </div>
+        </div>
+        <div class="setting-row sub-row">
+          <span class="setting-label sub-label">端口</span>
+          <div class="seg-group" id="seg-autostart">
+            <button class="seg-btn" data-scope="all" onclick="setAutoStartScope('all')">全部充电口</button>
+            <button class="seg-btn" data-scope="c1" onclick="setAutoStartScope('c1')">C1</button>
+            <button class="seg-btn" data-scope="c2" onclick="setAutoStartScope('c2')">C2</button>
+            <button class="seg-btn" data-scope="c3" onclick="setAutoStartScope('c3')">C3</button>
+            <button class="seg-btn" data-scope="a" onclick="setAutoStartScope('a')">A</button>
+          </div>
         </div>
       </div>
 
@@ -1251,7 +1363,9 @@ function switchView(view) {
 // ============================================================
 function renderSettings() {
   // Segmented buttons (piid 5, 6, 13)
-  document.querySelectorAll('.seg-btn').forEach(btn => {
+  // 只认带 data-piid 的：v1.6.0 起「自动启动」的端口分段按钮也用的是 .seg-btn，
+  // 但它们的数据来自 /api/autoport 而不是设备 settings，不能被这里改成未选中。
+  document.querySelectorAll('.seg-btn[data-piid]').forEach(btn => {
     const piid = btn.dataset.piid;
     const value = parseInt(btn.dataset.value);
     const current = settings[piid];
@@ -1860,6 +1974,105 @@ function showToast(message, type = 'info') {
 }
 
 // ============================================================
+// 自动启动（设备设置 > 场景设置，v1.6.0 从运行管理浮层搬来）
+// ------------------------------------------------------------
+// 后端规则没动，仍然是「软件启动时检查一次」：落在时间窗内就把所选范围内
+// 没开启的充电口打开，已经开着的不碰（判定逻辑在 desktop/autoport.py）。
+// 这里只负责配置的读写显示，走 /api/autoport，网页版和桌面壳子一视同仁。
+//
+// 和其它设置项一样「改完即存」，没有保存按钮 —— 低频设置多一个按钮，
+// 反而容易漏点，界面显示的和实际生效的就会对不上。
+// ============================================================
+let autoStart = null;
+let autoStartBusy = false;
+
+function clockNow() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function renderAutoStart() {
+  if (!autoStart) return;
+  const on = !!autoStart.enabled;
+  const sw = document.getElementById('toggle-autostart');
+  const desc = document.getElementById('autostart-desc');
+  const cfg = document.getElementById('autostart-cfg');
+  if (!sw || !desc || !cfg) return;
+
+  sw.checked = on;
+  cfg.classList.toggle('open', on);
+
+  let text = '';
+  if (!on) {
+    text = '已关闭，启动软件时不会自动检查充电口';
+  } else if (autoStart.inWindow) {
+    text = `当前在 ${autoStart.window} 时段内，下次启动会检查${autoStart.scope}`;
+  } else {
+    text = `不在 ${autoStart.window} 时段（现在 ${clockNow()}），本次不执行`;
+  }
+  desc.textContent = text;
+
+  // 回填时间窗：正在编辑的那个输入框不碰，否则会把用户挑到一半的值冲掉
+  const active = document.activeElement;
+  const sEl = document.getElementById('autostart-start');
+  const eEl = document.getElementById('autostart-end');
+  if (sEl && active !== sEl && sEl.value !== autoStart.start) sEl.value = autoStart.start;
+  if (eEl && active !== eEl && eEl.value !== autoStart.end) eEl.value = autoStart.end;
+
+  document.querySelectorAll('#seg-autostart .seg-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.scope === autoStart.ports);
+  });
+}
+
+async function loadAutoStart() {
+  try {
+    const resp = await fetch('/api/autoport', {cache: 'no-store'});
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (data && data.enabled !== undefined) {
+      autoStart = data;
+      renderAutoStart();
+    }
+  } catch (e) {
+    const desc = document.getElementById('autostart-desc');
+    if (desc && !autoStart) desc.textContent = '读取失败，请检查采集服务是否在运行';
+  }
+}
+
+async function saveAutoStart(patch) {
+  if (autoStartBusy) return;
+  autoStartBusy = true;
+  try {
+    const data = await apiCall('POST', '/api/autoport', patch);
+    if (data && data.enabled !== undefined) {
+      autoStart = data;
+      renderAutoStart();
+    }
+  } finally {
+    autoStartBusy = false;
+  }
+}
+
+function setAutoStartEnabled(on) {
+  haptic();
+  saveAutoStart({enabled: !!on});
+}
+
+function setAutoStartScope(scope) {
+  if (autoStart && autoStart.ports === scope) return;  // 已经是这个范围，不用重复存
+  haptic();
+  saveAutoStart({ports: scope});
+}
+
+function saveAutoStartWindow() {
+  const s = document.getElementById('autostart-start').value;
+  const e = document.getElementById('autostart-end').value;
+  if (!s || !e) return;
+  saveAutoStart({start: s, end: e});
+}
+
+// ============================================================
 // 对外控制通道（v1.3.8）
 // ------------------------------------------------------------
 // 桌面壳子（desktop/manager.py）在窗口隐藏/显示时通过 evaluate_js 调它，
@@ -1891,6 +2104,10 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('load', () => {
   connectWebSocket();
   initHistoryPanel();
+  loadAutoStart();
+  // 「现在 12:34:51」和「在不在时间窗内」都会随时间变，一分钟拉一次足够；
+  // 顺带也能接住「在另一个窗口/手机上改过设置」的情况。
+  setInterval(loadAutoStart, 60000);
   // Fetch initial status in case WS is slow
   fetch('/api/status').then(r => r.json()).then(data => {
     updateConnectionState(data.state);

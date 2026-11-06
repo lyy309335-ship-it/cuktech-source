@@ -277,6 +277,39 @@ def _run_web() -> None:
 
         app.router.add_get("/vendor/{name}", _handle_vendor)
 
+    # /api/autoport：设备设置里「自动启动」的配置（开关 / 时间窗 / 端口范围）。
+    #
+    # v1.6.0 起这个功能从「运行管理」浮层搬到了控制台网页的「设备设置 > 场景设置」，
+    # 所以得有一条页面能直接调的通路。为什么放在这里而不是 manager 里：页面本身是
+    # 这个服务端进程提供的（浏览器直开 127.0.0.1:8080 也是它），如果只走
+    # pywebview 的 js_api，那就只有桌面壳子里能用，网页版直接就废了。
+    #
+    # 端点只读写 autoport.json，不在这里执行开端口——真正的执行仍然由管理器
+    # 在启动时做，避免两个进程同时抢 BLE。
+    try:
+        from desktop import autoport as _autoport
+    except Exception as _exc:  # noqa: BLE001
+        _autoport = None
+        print(f"[!] 自动启动设置不可用（autoport 导入失败）: {_exc}", flush=True)
+
+    if _autoport is not None:
+
+        async def _handle_autoport_get(_request):
+            return web.json_response(_autoport.public_state())
+
+        async def _handle_autoport_set(request):
+            try:
+                payload = await request.json()
+            except Exception:  # noqa: BLE001
+                return web.json_response(
+                    {**_autoport.public_state(), "ok": False, "error": "请求格式不对"},
+                    status=400,
+                )
+            return web.json_response(_autoport.save_settings(payload))
+
+        app.router.add_get("/api/autoport", _handle_autoport_get)
+        app.router.add_post("/api/autoport", _handle_autoport_set)
+
     if _flag("CUKTECH_AUTO_CONNECT"):
         mgr = app["ble"]
         original_disconnect = mgr.do_disconnect

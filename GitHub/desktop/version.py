@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-VERSION = "1.5.0"
+VERSION = "1.7.0"
 
 # 运行管理面板、日志、安装包文件名都用这一份
 __all__ = ["VERSION"]

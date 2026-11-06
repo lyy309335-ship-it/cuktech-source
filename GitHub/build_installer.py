@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -422,8 +424,169 @@ def assert_no_secrets() -> None:
     print("    凭据门禁通过：_internal\\.env 三项均为空")
 
 
+# ---------------------------------------------------------------- 更新清单与发布
+#
+# 客户端只认两种东西：一个固定的清单地址 + 清单里的 sha256。
+# 地址固定是因为它被编译进 exe：用 GitHub 的 `releases/latest/download/update.json`，
+# 这个路径永远指向最新正式 release，换包换版本都不用改代码。
+
+
+def sha256_of(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def changelog_notes(version: str) -> list[str]:
+    """从 版本更新说明.md 摘本次版本的要点，给更新提示用。
+
+    只取两种东西：独立成行的加粗副标题（版本的一句话概括）+ 各级小节标题。
+    不抓 `- ` 列表项 —— 那是小节里的展开说明，塞进更新提示只会变成一堆半句话。
+    """
+    try:
+        text = CHANGELOG.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    pattern = re.compile(
+        rf"^##\s*v?{re.escape(version)}\b.*?$(.*?)(?=^##\s|\Z)", re.M | re.S
+    )
+    m = pattern.search(text)
+    if not m:
+        return []
+    body = m.group(1)
+
+    notes: list[str] = []
+    for line in body.splitlines():
+        s = line.strip()
+        mm = re.fullmatch(r"\*\*(.+?)\*\*", s)
+        if mm:
+            notes.append(mm.group(1).strip()[:120])
+            break
+
+    for line in body.splitlines():
+        s = line.strip()
+        if not s.startswith("###"):
+            continue
+        t = re.sub(r"^#+\s*", "", s)
+        t = re.sub(r"^\d+[.、)]\s*", "", t).strip()      # 去掉「1. 」这种编号
+        t = re.sub(r"\*\*(.+?)\*\*", r"\1", t).strip()
+        if t in ("升级须知", "注意事项", "已知问题", "已知限制", "兼容性"):
+            continue
+        if len(t) >= 3:
+            notes.append(t[:120])
+        if len(notes) >= 6:
+            break
+    return notes
+
+
+def updatecfg_repo() -> str:
+    try:
+        text = (HERE / "desktop" / "updatecfg.py").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    m = re.search(r'(?m)^REPO\s*=\s*"([^"]*)"', text)
+    return m.group(1).strip() if m else ""
+
+
+def write_updatecfg_repo(repo: str) -> None:
+    path = HERE / "desktop" / "updatecfg.py"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    text2 = re.sub(r'(?m)^REPO\s*=\s*"[^"]*"', f'REPO = "{repo}"', text, count=1)
+    if text2 != text:
+        path.write_text(text2, encoding="utf-8")
+        print(f"    已把仓库地址写入 desktop\\updatecfg.py：{repo}")
+
+
+def gh(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
+    try:
+        r = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=180)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # 没装 gh / 超时：check=False 时不能把整个构建带崩（本地构建是常态）
+        if not check:
+            return subprocess.CompletedProcess(["gh", *args], 127, "", str(exc))
+        raise SystemExit(f"调用 gh 失败：{exc!r}（先装 GitHub CLI 并 `gh auth login`）") from exc
+    if check and r.returncode != 0:
+        raise SystemExit(f"gh {' '.join(args[:3])} 失败：{(r.stderr or r.stdout).strip()[:400]}")
+    return r
+
+
+def resolve_repo() -> str:
+    """仓库地址：先看 updatecfg.py，没配就问 gh 并自动回填（要求已挂 remote）。"""
+    repo = updatecfg_repo()
+    if repo:
+        return repo
+    r = gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], check=False)
+    slug = (r.stdout or "").strip()
+    if r.returncode == 0 and "/" in slug:
+        write_updatecfg_repo(slug)
+        return slug
+    return ""
+
+
+def write_update_manifest(version: str, repo: str) -> Path | None:
+    """生成 dist\\update.json。没有仓库地址就跳过（本地构建不该被发布配置卡住）。"""
+    if not repo:
+        print("[!] 没拿到仓库地址，跳过 update.json。"
+              "发版前先 `gh auth login` 并给仓库挂 remote，或手填 desktop\\updatecfg.py 的 REPO")
+        return None
+    name = f"CUKTECH-Setup_v{version}.exe"
+    setup = DIST_DIR / name
+    if not setup.is_file():
+        raise SystemExit(f"找不到安装包：{setup}")
+    digest = sha256_of(setup)
+    manifest = {
+        "version": version,
+        "min_version": "",
+        "pub_date": time.strftime("%Y-%m-%d"),
+        "notes": changelog_notes(version),
+        "downloads": [{
+            "url": f"https://github.com/{repo}/releases/download/v{version}/{name}",
+            "sha256": digest,
+            "size": setup.stat().st_size,
+        }],
+    }
+    out = DIST / "update.json"
+    out.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"    更新清单：dist\\update.json  sha256={digest[:16]}…  "
+          f"{setup.stat().st_size / 1024 / 1024:.1f} MB")
+    return out
+
+
+def publish_release(version: str, repo: str, manifest: Path) -> None:
+    """把安装包和清单传到 GitHub Releases。"""
+    r = gh(["repo", "view", repo, "--json", "visibility", "-q", ".visibility"], check=False)
+    vis = (r.stdout or "").strip().lower()
+    if r.returncode == 0 and vis and vis != "public":
+        # 私有仓库的 release 下载要 token，客户端匿名拉不到，会一直 404
+        raise SystemExit(f"仓库 {repo} 是 {vis}，release 匿名拉不到。改成 public 再发。")
+
+    tag = f"v{version}"
+    if gh(["release", "view", tag, "--repo", repo], check=False).returncode == 0:
+        raise SystemExit(f"{tag} 已经发过了。版本号必须递增，不能覆盖发布（旧客户端会拿到互相矛盾的包）")
+
+    notes = changelog_notes(version)
+    notes_file = DIST / f"release-notes-{tag}.md"
+    notes_file.write_text(
+        "\n".join([f"## {tag}", ""] + [f"- {n}" for n in notes]) if notes else f"{tag}\n",
+        encoding="utf-8",
+    )
+    print(f"[发布] 创建 release {tag} …")
+    gh(["release", "create", tag, "--repo", repo, "--title", tag, "--notes-file", str(notes_file)])
+    print("[发布] 上传安装包 + 更新清单 …")
+    gh(["release", "upload", tag,
+        str(DIST_DIR / f"CUKTECH-Setup_v{version}.exe"), str(manifest), "--repo", repo])
+    print(f"    完成：https://github.com/{repo}/releases/tag/{tag}")
+    print(f"    清单：https://github.com/{repo}/releases/latest/download/update.json")
+
+
 def main() -> None:
     py = str(Path(sys.executable))
+    publish = "--publish" in sys.argv
     # 走 `python -m PyInstaller` 而不是 .venv\Scripts\pyinstaller.exe：
     # 那个 console script 在本机实测会静默退出（--version 都返回 1、不打一行输出），
     # 构建脚本只能看到"命令失败（1）"，查起来毫无线索。-m 形式永远能跑。
@@ -508,6 +671,16 @@ def main() -> None:
     print("[收尾] 归档 + 同步分发目录 …")
     publish_artifacts(version)
     sync_distribution_docs()
+
+    # 更新清单：每次构建都生成一份（本地也能验 sha256），真正发到 GitHub 要加 --publish
+    print("[收尾] 生成更新清单 …")
+    repo = resolve_repo()
+    manifest = write_update_manifest(version, repo)
+    if publish and manifest:
+        publish_release(version, repo, manifest)
+    elif publish:
+        print("[!] --publish 被跳过：没有仓库地址。见上面那行提示。")
+
     try:
         prune_old_outputs()
     except Exception as exc:                         # noqa: BLE001
