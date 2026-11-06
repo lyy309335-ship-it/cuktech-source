@@ -33,11 +33,55 @@ from desktop.wv2env import apply_sandbox_workaround, storage_path
 APP_NAME = "CUKTECH"
 EXE_NAME = "token_extractor.exe"
 QR_URL = "http://127.0.0.1:31415"
+QR_PORT = 31415
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 QR_MIN_BYTES = 1000
 
+# 小米登录二维码的服务端有效期是 300 秒（longPolling/loginUrl 返回的 timeout 字段）。
+# 一旦过期，token_extractor 的长轮询会走到它自己的 bug：
+#     except Timeout: ... break        # response 从未赋值
+#     if response.status_code != 200:  # → UnboundLocalError
+# 这个 exe 是第三方编译产物，改不了，所以只能赶在它踩雷之前主动换一张新码。
+QR_ROTATE_SECS = 240      # 留 60 秒余量
+MAX_QR_RESTARTS = 6       # 自动重启上限，防止死循环
+
 # 本地回环请求要明确绕开系统代理，否则会被 HTTPS_PROXY 之类的变量劫持
 _QR_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+# 取码工具同样不能被代理劫持。实测（2026-11-06 sandbox6）：
+# 本机挂着 HTTPS_PROXY=127.0.0.1:2329，token_extractor 继承了它，
+# 扫码登录成功、也拿到了设备列表，但接着去探测其他服务器时连接被代理重置：
+#     requests.exceptions.ConnectionError(10054) → get_homes 抛异常
+#     → 整个进程崩掉 → tokens.json 没写成 → 用户看到「扫了没反应」。
+# 它是第三方 exe，改不了源码，只能在启动时把这几个变量摘掉。
+_PROXY_VARS = (
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+)
+
+
+def _child_env() -> dict:
+    """给取码子进程用的环境：去掉一切代理想直连小米服务器。"""
+    e = dict(os.environ)
+    for k in _PROXY_VARS:
+        e.pop(k, None)
+    return e
+
+
+
+def _qr_port_busy() -> bool:
+    """31415 还被占着就说明旧取码进程没退干净，新进程绑不上。"""
+    import socket
+
+    s = socket.socket()
+    s.settimeout(0.2)
+    try:
+        s.connect(("127.0.0.1", QR_PORT))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
 
 
 def _find_extractor() -> Path | None:
@@ -79,6 +123,10 @@ class Api:
         self._qr_hash = ""          # 上一帧二维码的摘要，用来判断要不要推新图
         self._qr_started = 0.0      # 取码进程启动时刻，用于算「等了多久」
         self._auto_qr = False       # 本次是不是静默扫码模式（关窗时要把进程收掉）
+        self._gen = 0               # 第几次启动取码进程，旧监视线程靠它失效
+        self._restarts = 0          # 已自动重启次数
+        self._restarting = False    # 重启中，避免并发触发两次
+        self._server = "cn"         # 查设备用的区域；失败后回退成全区域空串
 
     # --- 状态
     def status(self) -> dict:
@@ -150,7 +198,7 @@ class Api:
         return {"ok": True, "path": str(target)}
 
     # --- 调起取码工具（后台跑，页面轮询结果）
-    def open_extractor(self, auto_qr: bool = False) -> dict:
+    def open_extractor(self, auto_qr: bool = False, server: str = "cn") -> dict:
         """启动 token_extractor。
 
         auto_qr=True：不开窗口，stdin 直接喂 `q` 进扫码模式，二维码由页面内嵌显示。
@@ -158,6 +206,17 @@ class Api:
         """
         if self._extract.get("running"):
             return {"ok": True, "already": True}
+
+        # 31415 被占 = 上一次崩溃残留的僵尸取码进程，或另一个实例正在扫码。
+        # 不先清掉的话新进程绑不上端口，页面照样能从 31415 取到图 —— 但那是
+        # 「别人家的二维码」，而本实例盯的是自己的 tokens.json，
+        # 用户扫完永远等不到结果（表现为「扫了没反应」）。所以开工前必须先拿回端口。
+        if _qr_port_busy():
+            subprocess.run(["taskkill", "/F", "/IM", EXE_NAME], capture_output=True)
+            for _ in range(25):            # 最多等 5 秒
+                if not _qr_port_busy():
+                    break
+                time.sleep(0.2)
 
         exe = _find_extractor()
         if exe is None:
@@ -177,7 +236,14 @@ class Api:
             # 二维码本身从 127.0.0.1:31415 取，不依赖控制台文本。
             log_path = out_dir / "extractor.log"
             try:
-                log_fh = open(log_path, "wb")
+                # 追加写：每次换码都会重启取码进程，用 "wb" 会把上一次崩溃的
+                # 现场直接抹掉，事后无从排查。超过 512 KB 才清一次。
+                try:
+                    if log_path.is_file() and log_path.stat().st_size > 512 * 1024:
+                        log_path.unlink()
+                except OSError:
+                    pass
+                log_fh = open(log_path, "ab")
             except OSError:
                 log_fh = subprocess.DEVNULL
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -189,12 +255,21 @@ class Api:
                     stdout=log_fh,
                     stderr=subprocess.STDOUT,
                     creationflags=flags,
+                    env=_child_env(),      # 必须摘掉代理，见 _PROXY_VARS 注释
                 )
             except OSError as exc:
                 return {"ok": False, "error": f"启动取码工具失败：{exc}"}
             try:
                 if proc.stdin is not None:
-                    proc.stdin.write(b"q\n")
+                    # 两行，对应它前两次输入提示：
+                    #   1) "p/q:"             → q，走扫码登录
+                    #   2) "Select server"    → cn（中国区）
+                    # 第二行原来喂空行=探测全部 8 个服务器，实测每个都要一次网络
+                    # 往返，任一次被掐断整个进程就崩（sandbox6 就是这么崩的），
+                    # 所以只查目标区域。万一账号不在 cn，_no_device_fallback()
+                    # 会退回「全部服务器」再试一次。
+                    # input() 是按行读的，多写一行留在缓冲里不会丢。
+                    proc.stdin.write(f"q\n{server}\n\n".encode())
                     proc.stdin.flush()
             except (OSError, ValueError):
                 pass
@@ -208,6 +283,7 @@ class Api:
                     [str(exe), "-o", str(out_json)],
                     cwd=str(exe.parent),
                     creationflags=flags,
+                    env=_child_env(),
                 )
             except OSError as exc:
                 return {"ok": False, "error": f"启动取码工具失败：{exc}"}
@@ -215,8 +291,60 @@ class Api:
         self._proc = proc
         self._auto_qr = auto_qr
         self._extract = {"running": True, "done": False, "values": None, "error": ""}
-        threading.Thread(target=self._wait_extract, args=(proc, out_json), daemon=True).start()
+        self._gen += 1
+        threading.Thread(
+            target=self._wait_extract, args=(proc, out_json, self._gen), daemon=True
+        ).start()
         return {"ok": True, "qr": auto_qr}
+
+    def _restart_extractor(self, reason: str) -> bool:
+        """把取码进程换一个。
+
+        两个场景会走到这里：
+          ① 二维码快到 300 秒有效期 → 主动换新码（否则 exe 必崩）；
+          ② exe 已经崩了（长轮询异常）→ 拉起来重来，别让用户面对一个死界面。
+        """
+        if self._restarting or self._restarts >= MAX_QR_RESTARTS:
+            return False
+        self._restarting = True
+        try:
+            self._restarts += 1
+            print(f"[wizard] {reason}，重启取码工具（第 {self._restarts} 次）", flush=True)
+
+            proc = self._proc
+            self._gen += 1                       # 旧监视线程从此不再写状态
+            self._extract = {"running": False, "done": False, "values": None, "error": ""}
+            self._proc = None
+
+            if proc is not None and proc.poll() is None:
+                # 必须杀进程树：token_extractor 是 PyInstaller 产物，跑起来是
+                # 「bootloader + 脚本」两个进程，TerminateProcess 只干掉父进程，
+                # 子进程照样占着 31415，新进程绑不上端口，页面就会一直看到旧码。
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    capture_output=True,
+                )
+                try:
+                    proc.wait(timeout=3)
+                except Exception:  # noqa: BLE001
+                    pass
+
+            # 等端口释放，否则新进程绑不上 31415
+            for _ in range(30):
+                if not _qr_port_busy():
+                    break
+                time.sleep(0.2)
+            else:
+                # 还有残留（异常路径下可能出现），按镜像名兜底清一次
+                subprocess.run(["taskkill", "/F", "/IM", EXE_NAME], capture_output=True)
+                time.sleep(0.6)
+
+            self._qr_hash = ""
+            self._qr_started = 0.0
+            res = self.open_extractor(auto_qr=True, server=self._server)
+            return bool(res.get("ok"))
+        finally:
+            self._restarting = False
 
     # --- 二维码（页面每 0.6 秒来问一次）
     def qr_frame(self) -> dict:
@@ -228,6 +356,27 @@ class Api:
         phase    : starting | qrcode | done | error
         """
         state = self._elapsed()
+
+        # ① 快到服务端有效期了：主动换码。不换的话 token_extractor 的长轮询
+        #    会超时 → 走到它那个 response 未赋值的 bug → 整个进程崩掉。
+        if (
+            self._extract.get("running")
+            and self._qr_started
+            and time.time() - self._qr_started > QR_ROTATE_SECS
+        ):
+            if self._restart_extractor("二维码即将过期"):
+                return {"phase": "rotating", "png": "", "unchanged": True, **self._elapsed()}
+
+        # ② 取码进程异常退出：自动重来一次，而不是直接把「取码失败」甩给用户。
+        if self._extract.get("done") and not self._extract.get("values"):
+            why = self._extract.get("error") or "取码进程异常退出"
+            # 中国区一个设备都没匹配上 → 账号大概率不在 cn（外区账号），
+            # 退回「探测全部服务器」再试一次，别让这类用户直接卡死。
+            if self._server == "cn" and "CUKTECH" in why:
+                self._server = ""
+            if self._restart_extractor(f"取码失败（{why}）"):
+                return {"phase": "rotating", "png": "", "unchanged": True, **self._elapsed()}
+
         if self._extract.get("done"):
             if self._extract.get("values"):
                 return {"phase": "done", "png": "", "unchanged": True, **state}
@@ -260,11 +409,38 @@ class Api:
         secs = int(time.time() - self._qr_started) if self._qr_started else 0
         return {"elapsed": secs, "running": bool(self._extract.get("running"))}
 
-    def _wait_extract(self, proc: subprocess.Popen, out_json: Path) -> None:
+    def _wait_extract(self, proc: subprocess.Popen, out_json: Path, gen: int = 0) -> None:
+        def alive() -> bool:
+            """被重启换掉的旧进程，不许再往状态里写东西。"""
+            return gen == self._gen
+
         try:
+            # 不能一直傻等进程退出：上游 exe 把 tokens.json 写完，还会停在
+            # "Press ENTER to finish" 再等一行输入。万一那行没喂进去，它就一直
+            # 挂着不退出，界面误判成「还在取码」，240 秒后自动换码直接把这次
+            # 成功登录杀掉 —— 用户看到的就是「扫了没反应」（实测 sandbox7）。
+            # 所以盯着结果文件：大小不再变大就当作写完了，直接收掉进程往下走。
+            deadline = time.time() + 900
+            last_size = -1
+            while proc.poll() is None and time.time() < deadline:
+                time.sleep(0.5)
+                if out_json.is_file():
+                    size = out_json.stat().st_size
+                    if size > 0 and size == last_size:
+                        break          # 连续两次一样大 → 写完了
+                    last_size = size
+            if proc.poll() is None and out_json.is_file():
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    capture_output=True,
+                )
             code = proc.wait()
         except Exception as exc:  # noqa: BLE001
-            self._extract.update(running=False, done=True, error=f"取码进程异常：{exc}")
+            if alive():
+                self._extract.update(running=False, done=True, error=f"取码进程异常：{exc}")
+            return
+
+        if not alive():
             return
 
         if not out_json.is_file():
@@ -313,16 +489,23 @@ class Api:
         # 静默扫码模式下用户没有控制台可关，进程得由我们收掉，
         # 否则它会一直占着 127.0.0.1:31415，下次再扫码就取不到图。
         # 已经拿到结果时不动它（可能还在写 JSON）。
+        # 必须是「杀进程树」：PyInstaller 产物有 bootloader + 脚本两个进程，
+        # 只 terminate 父进程的话，子进程会一直占着端口，下次扫码必然取不到图。
         try:
-            if (self._auto_qr and self._proc and self._proc.poll() is None
-                    and not self._extract.get("done")):
-                self._proc.terminate()
+            if self._proc and self._proc.poll() is None and not self._extract.get("done"):
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(self._proc.pid)],
+                    capture_output=True,
+                )
                 try:
                     self._proc.wait(timeout=3)
                 except Exception:  # noqa: BLE001
-                    self._proc.kill()
+                    pass
         except Exception:  # noqa: BLE001
             pass
+        # 兜底：真还有残留就按镜像名扫一遍，别把 31415 留给幽灵进程
+        if _qr_port_busy():
+            subprocess.run(["taskkill", "/F", "/IM", EXE_NAME], capture_output=True)
         try:
             if self._window is not None:
                 self._window.destroy()

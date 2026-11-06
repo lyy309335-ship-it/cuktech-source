@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "cuktech-ble-controller"
 # 版本号由 desktop/version.py 派生：构建时 build_installer.sync_project_metadata()
 # 会自动改写这一行，别手改（手改了下次出包也会被覆盖回去）。
-version = "1.8.0"
+version = "1.8.1"
 description = "Local BLE controller and web UI for the CUKTECH 10 GaN Charger Ultra."
 readme = "README.md"
 requires-python = ">=3.9"
