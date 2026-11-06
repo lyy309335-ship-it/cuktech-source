@@ -4,19 +4,27 @@
 manager 主线程被 `webview.start()` 占着，同进程再开第二个 WebView2 宿主
 需要额外协调消息循环；而向导是一次性对话框，没必要让它常驻。
 
-三条通道最终都走 `credentials.save()`：
-    · 粘贴整段文本（最常用，兼容任何取码方式）
+**首选通道是扫码**：`token_extractor.exe` 以交互模式启动后（stdin 喂 `q`），
+会在 `127.0.0.1:31415` 上挂出登录二维码的 PNG。本模块轮询这个地址，
+把图直接塞进网页里显示（不再弹系统看图窗口、不再开黑控制台），
+用户用米家 App 扫一下，进程退出后解析它写出的 JSON 并自动落盘。
+
+另外两条兜底通道都走 `credentials.save()`：
+    · 粘贴整段文本（兼容任何取码方式）
     · 从文件导入 credentials.txt / tokens.json
-    · 直接调起取码工具，后台解析它写出的 JSON
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import os
 import re
 import subprocess
 import sys
 import threading
+import time
+import urllib.request
 from pathlib import Path
 
 from desktop import credentials, paths
@@ -24,6 +32,12 @@ from desktop.wv2env import apply_sandbox_workaround, storage_path
 
 APP_NAME = "CUKTECH"
 EXE_NAME = "token_extractor.exe"
+QR_URL = "http://127.0.0.1:31415"
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+QR_MIN_BYTES = 1000
+
+# 本地回环请求要明确绕开系统代理，否则会被 HTTPS_PROXY 之类的变量劫持
+_QR_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def _find_extractor() -> Path | None:
@@ -62,6 +76,9 @@ class Api:
         self._window = None
         self._proc: subprocess.Popen | None = None
         self._extract = {"running": False, "done": False, "values": None, "error": ""}
+        self._qr_hash = ""          # 上一帧二维码的摘要，用来判断要不要推新图
+        self._qr_started = 0.0      # 取码进程启动时刻，用于算「等了多久」
+        self._auto_qr = False       # 本次是不是静默扫码模式（关窗时要把进程收掉）
 
     # --- 状态
     def status(self) -> dict:
@@ -133,7 +150,12 @@ class Api:
         return {"ok": True, "path": str(target)}
 
     # --- 调起取码工具（后台跑，页面轮询结果）
-    def open_extractor(self) -> dict:
+    def open_extractor(self, auto_qr: bool = False) -> dict:
+        """启动 token_extractor。
+
+        auto_qr=True：不开窗口，stdin 直接喂 `q` 进扫码模式，二维码由页面内嵌显示。
+        auto_qr=False：保留老行为，弹一个黑控制台，二维码用系统看图程序打开。
+        """
         if self._extract.get("running"):
             return {"ok": True, "already": True}
 
@@ -150,20 +172,93 @@ class Api:
         except OSError:
             pass
 
-        flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-        try:
-            # 新控制台：扫码提示、二维码、设备列表都在那个窗口里，和以前一样
-            proc = subprocess.Popen(
-                [str(exe), "-o", str(out_json)],
-                cwd=str(exe.parent),
-                creationflags=flags,
-            )
-        except OSError as exc:
-            return {"ok": False, "error": f"启动取码工具失败：{exc}"}
+        if auto_qr:
+            # 静默模式：不弹控制台，stdin 喂 q。stdout 落到日志文件，
+            # 二维码本身从 127.0.0.1:31415 取，不依赖控制台文本。
+            log_path = out_dir / "extractor.log"
+            try:
+                log_fh = open(log_path, "wb")
+            except OSError:
+                log_fh = subprocess.DEVNULL
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            try:
+                proc = subprocess.Popen(
+                    [str(exe), "-o", str(out_json)],
+                    cwd=str(exe.parent),
+                    stdin=subprocess.PIPE,
+                    stdout=log_fh,
+                    stderr=subprocess.STDOUT,
+                    creationflags=flags,
+                )
+            except OSError as exc:
+                return {"ok": False, "error": f"启动取码工具失败：{exc}"}
+            try:
+                if proc.stdin is not None:
+                    proc.stdin.write(b"q\n")
+                    proc.stdin.flush()
+            except (OSError, ValueError):
+                pass
+            self._qr_hash = ""
+            self._qr_started = time.time()
+        else:
+            flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            try:
+                # 新控制台：扫码提示、二维码、设备列表都在那个窗口里，和以前一样
+                proc = subprocess.Popen(
+                    [str(exe), "-o", str(out_json)],
+                    cwd=str(exe.parent),
+                    creationflags=flags,
+                )
+            except OSError as exc:
+                return {"ok": False, "error": f"启动取码工具失败：{exc}"}
 
+        self._proc = proc
+        self._auto_qr = auto_qr
         self._extract = {"running": True, "done": False, "values": None, "error": ""}
         threading.Thread(target=self._wait_extract, args=(proc, out_json), daemon=True).start()
-        return {"ok": True}
+        return {"ok": True, "qr": auto_qr}
+
+    # --- 二维码（页面每 0.6 秒来问一次）
+    def qr_frame(self) -> dict:
+        """返回当前该显示什么。
+
+        png      : 新的一帧二维码（base64，不含 data: 前缀）
+        unchanged: 图没变，页面不用重画
+        waiting  : 取码工具还没把服务挂起来（或二维码还没生成）
+        phase    : starting | qrcode | done | error
+        """
+        state = self._elapsed()
+        if self._extract.get("done"):
+            if self._extract.get("values"):
+                return {"phase": "done", "png": "", "unchanged": True, **state}
+            return {"phase": "error", "error": self._extract.get("error") or "取码失败",
+                    "png": "", "unchanged": True, **state}
+
+        data = None
+        try:
+            with _QR_OPENER.open(QR_URL, timeout=2) as resp:
+                if resp.status == 200:
+                    data = resp.read()
+        except Exception:  # noqa: BLE001
+            data = None
+
+        if not data or not data.startswith(PNG_MAGIC) or len(data) < QR_MIN_BYTES:
+            return {"phase": "starting", "png": "", "unchanged": True, **state}
+
+        digest = hashlib.sha1(data).hexdigest()
+        if digest == self._qr_hash:
+            return {"phase": "qrcode", "png": "", "unchanged": True, **state}
+        self._qr_hash = digest
+        return {
+            "phase": "qrcode",
+            "png": base64.b64encode(data).decode("ascii"),
+            "unchanged": False,
+            **state,
+        }
+
+    def _elapsed(self) -> dict:
+        secs = int(time.time() - self._qr_started) if self._qr_started else 0
+        return {"elapsed": secs, "running": bool(self._extract.get("running"))}
 
     def _wait_extract(self, proc: subprocess.Popen, out_json: Path) -> None:
         try:
@@ -215,9 +310,17 @@ class Api:
 
     # --- 窗口
     def close(self) -> dict:
+        # 静默扫码模式下用户没有控制台可关，进程得由我们收掉，
+        # 否则它会一直占着 127.0.0.1:31415，下次再扫码就取不到图。
+        # 已经拿到结果时不动它（可能还在写 JSON）。
         try:
-            if self._proc and self._proc.poll() is None:
-                pass          # 取码窗口留给用户自己关，别替他杀
+            if (self._auto_qr and self._proc and self._proc.poll() is None
+                    and not self._extract.get("done")):
+                self._proc.terminate()
+                try:
+                    self._proc.wait(timeout=3)
+                except Exception:  # noqa: BLE001
+                    self._proc.kill()
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -243,12 +346,12 @@ def run() -> int:
 
     api = Api()
     window = webview.create_window(
-        "设置设备凭据",
+        "连接充电器",
         url=page.as_uri(),
         js_api=api,
         width=620,
-        height=700,
-        min_size=(520, 600),
+        height=720,
+        min_size=(520, 620),
         background_color="#0f1117",
         # 别设 text_select=False：粘贴框要能选中文字，否则复制粘贴全废
     )

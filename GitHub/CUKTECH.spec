@@ -39,10 +39,13 @@ datas = [
 ]
 
 # 取码工具跟着安装包走（用户不用另外找），落在 _internal\tools\。
-# 放在项目根的 tools\ 下，不进 _internal 根目录，免得和运行期资源混在一起。
+# 只挑运行期真要用的三个文件：整个 tools\ 目录塞进去会把调试脚本、截图和
+# __pycache__ 一起带进包里（v1.8.0 实测多出 200 KB 且毫无意义）。
 _TOOLS = HERE.parent / "tools"
-if _TOOLS.is_dir():
-    datas.append((str(_TOOLS), "tools"))
+for _name in ("token_extractor.exe", "collect_credentials.py", "watch_qr.py"):
+    _f = _TOOLS / _name
+    if _f.is_file():
+        datas.append((str(_f), "tools"))
 
 hiddenimports = [
     # 上游包是 editable 安装，PyInstaller 分析不到，必须点名
