@@ -40,10 +40,9 @@ ARCHIVE_HISTORY = ARCHIVE / "历史"
 DIST_DIR = ROOT / "分发"
 
 # 文档里写死安装包文件名的地方，构建时对着版本号核一遍
-# （分发\先看这里.txt 原来是手写的，版本号停在 v1.4.1 —— 现在它写的是
-#  「CUKTECH-Setup_v版本号.exe」这种不带具体数字的形式，这里同样核一遍，
-#   防止有人又手抖写回一个固定版本）
-VERSIONED_DOCS = ("使用说明.md", "README.md", "分发/先看这里.txt")
+# （原 `分发\先看这里.txt` 那份分发说明已在 v1.8.2 并入 `使用说明.md`，
+#   所以这里只剩这两份；以后再加文档记得同步进这个元组，否则漏核）
+VERSIONED_DOCS = ("使用说明.md", "README.md")
 SETUP_NAME_RE = re.compile(r"CUKTECH-Setup_v(\d+\.\d+\.\d+)\.exe")
 
 # 版本号的「派生副本」。唯一来源永远是 desktop/version.py ——
