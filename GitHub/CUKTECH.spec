@@ -62,6 +62,8 @@ hiddenimports = [
     "desktop.version",      # 版本号唯一来源，管理器和卡片都从这里取
     "desktop.autoport",     # 7:00–12:00 启动时自动开充电口
     "desktop.wv2env",       # 函数内 import，点名更保险
+    "desktop.webview2_check",  # 启动闸门，函数内 import
+    "winreg",               # 预检读注册表，动态 import
     "desktop.credentials",  # 凭据读写，向导和采集服务都要用
     "desktop.credential_wizard",  # --collect 角色，函数内 import
     # 托盘后端与 webview 后端都是运行期动态 import 的

@@ -167,9 +167,31 @@ def _watch_wake_event(manager) -> None:
     threading.Thread(target=loop, daemon=True).start()
 
 
+def _gate_webview2(argv: list[str]) -> None:
+    """创建任何窗口之前，先确认 WebView2 运行时在。
+
+    缺了它窗口不会报错也不会退出，只是「什么都不出现」—— 这是发给非技术用户时
+    最容易变成「软件打不开」投诉的失败模式，所以自己先拦一道。
+    采集服务（--service）与更新进程（--update-runner）不建窗口，不拦。
+    """
+    role = "widget" if "--widget" in argv else ("collect" if "--collect" in argv else "manager")
+    interactive = "--silent" not in argv      # 开机自启是 --silent，绝对不能弹模态框
+    try:
+        from desktop import webview2_check
+
+        ok = webview2_check.ensure(interactive=interactive, role=role)
+    except Exception:  # noqa: BLE001
+        # 预检自身出问题不该把程序搞挂，放行让 WebView2 自己去报错
+        return
+    if not ok:
+        sys.exit(1)
+
+
 def main() -> None:
     _patch_streams()
     argv = sys.argv[1:]
+    if "--service" not in argv and "--update-runner" not in argv:
+        _gate_webview2(argv)
     if "--service" in argv:
         run_service()
     elif "--widget" in argv:
