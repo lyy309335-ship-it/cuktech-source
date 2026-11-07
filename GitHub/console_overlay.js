@@ -118,6 +118,9 @@
     '.ckt-mini.hot{border-color:rgba(110,231,214,.45);background:rgba(110,231,214,.14);color:#6ee7d6}',
     '.ckt-mini.hot:hover{background:rgba(110,231,214,.22)}',
     '.ckt-mini:disabled{opacity:.5;cursor:not-allowed}',
+    // 面板里可点的邮箱文案（v2.0.0 追加）
+    '.ckt-link{color:#8fb8ff!important;cursor:pointer;text-decoration:underline dotted}',
+    '.ckt-link:hover{color:#b3cdff!important}',
     '.ckt-up-hi{color:#6ee7d6!important}',
     '.ckt-up-err{color:#f09696!important}',
 
@@ -132,6 +135,14 @@
     '.ckt-donate .ckt-dh{display:flex;align-items:center;gap:8px;margin-bottom:9px}',
     '.ckt-donate .ckt-dt{flex:1;font-size:12.5px;font-weight:600}',
     '.ckt-donate img{display:block;width:100%;border-radius:11px;background:#fff}',
+    '.ckt-donate .ckt-tabs{display:flex;gap:6px;margin-bottom:9px}',
+    '.ckt-donate .ckt-tab{flex:1;padding:6px 0;border-radius:9px;cursor:pointer;',
+    'border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#98a2b8;',
+    'font:12px/1 inherit;transition:.15s}',
+    '.ckt-donate .ckt-tab:hover{background:rgba(255,255,255,.09);color:#cfd6e4}',
+    '.ckt-donate .ckt-tab.on{background:rgba(110,231,214,.16);border-color:rgba(110,231,214,.45);color:#6ee7d6}',
+    '.ckt-donate .ckt-mail{color:#8fb8ff;text-decoration:none}',
+    '.ckt-donate .ckt-mail:hover{text-decoration:underline}',
     '.ckt-donate .ckt-df{margin-top:9px;font-size:10.5px;color:#6c7488;text-align:center;line-height:1.6}',
 
     '.ckt-toast{position:fixed;right:16px;bottom:104px;z-index:' + Z + ';padding:7px 12px;border-radius:9px;',
@@ -149,6 +160,30 @@
 
   function api() {
     return (window.pywebview && window.pywebview.api) || null;
+  }
+
+  // Bug 反馈邮箱（v2.0.0 追加）：面板一行 + 捐赠浮窗页脚都用它，放在这里免得顺序踩坑
+  var FEEDBACK_MAIL = 'X3093354438@icloud.com';
+
+  // 把一段文字塞进剪贴板。navigator.clipboard 在 http://127.0.0.1 属安全上下文，能用；
+  // 万一被策略拦（老 WebView2 / 权限设置），退回 execCommand 那条老路。
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (ok, no) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        var done = document.execCommand('copy');
+        document.body.removeChild(ta);
+        done ? ok() : no(new Error('execCommand copy failed'));
+      } catch (e) { no(e); }
+    });
   }
 
   // ---------------------------------------------------------------- 骨架
@@ -239,11 +274,39 @@
     var dr = h('div', 'ckt-row');
     var dtxt = h('div', 'ckt-txt');
     dtxt.appendChild(h('div', 'ckt-t1', '支持开发'));
-    dtxt.appendChild(h('div', 'ckt-t2', '微信扫码，随心打赏'));
+    dtxt.appendChild(h('div', 'ckt-t2', '微信 / 支付宝扫码，随心打赏'));
     dr.appendChild(dtxt);
     var dbtn = h('button', 'ckt-mini', '捐赠');
     dr.appendChild(dbtn);
     box.appendChild(dr);
+
+    // v2.0.0 追加：Bug 反馈邮箱就放在捐赠下面一行，不另开面板
+    var fr = h('div', 'ckt-row');
+    var ftxt = h('div', 'ckt-txt');
+    ftxt.appendChild(h('div', 'ckt-t1', '问题反馈'));
+    var fmail = h('div', 'ckt-t2 ckt-link', FEEDBACK_MAIL);
+    fmail.title = '点一下复制邮箱';
+    ftxt.appendChild(fmail);
+    fr.appendChild(ftxt);
+    var fbtn = h('button', 'ckt-mini', '复制');
+    fr.appendChild(fbtn);
+    box.appendChild(fr);
+
+    fmail.onclick = fbtn.onclick = function () {
+      copyText(FEEDBACK_MAIL).then(function () {
+        say('邮箱已复制：' + FEEDBACK_MAIL);
+      }).catch(function () {
+        // 老 WebView / 剪贴板被策略拦：退化成选中，用户自己 Ctrl+C
+        try {
+          var r = document.createRange();
+          r.selectNodeContents(fmail);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(r);
+        } catch (e) {}
+        say('复制失败，已选中，请 Ctrl+C');
+      });
+    };
 
     panel.appendChild(box);
     return { t2: t2, act: act, prog: prog, fill: fill, donate: dbtn };
@@ -341,14 +404,61 @@
 
   // ---------------- 捐赠浮窗（v2.0.0）
   // 第一次点才建 DOM：绝大多数人不会点，没必要每次注入都创建一堆节点。
+  // 两个渠道（微信 / 支付宝）用两个页签切，同一张图位换 src，不堆两张长图。
   // 图片来源有两条路：
-  //   1. /donate.jpg —— 图片就躺在 web\ 目录里，控制台页面同源，浏览器自己缓存；
+  //   1. /donate.jpg、/alipay.jpg —— 图片就躺在 web\ 目录里，控制台页面同源，浏览器自己缓存；
   //   2. js_api 的 data URI —— 窗口停在本地引导页（file:// 源）时相对路径取不到，
-  //      由 Python 把 web\donate.jpg 读出来编成 data URI 兜底。
+  //      由 Python 把 web\ 下的图读出来编成 data URI 兜底。
+  var DONATE_KINDS = [
+    { key: 'wechat', name: '微信', title: '微信扫码捐赠', src: '/donate.jpg', alt: '微信支付捐赠码', file: 'donate.jpg' },
+    { key: 'alipay', name: '支付宝', title: '支付宝扫码捐赠', src: '/alipay.jpg', alt: '支付宝收款码', file: 'alipay.jpg' }
+  ];
   var donateMask = null;
+  var donateImg = null;
+  var donateTitle = null;
+  var donateTabs = {};
+  var donateKind = 'wechat';
+  var donateTried = {};   // 哪个渠道已经退过 data URI，避免来回打转
 
   function hideDonate() {
     if (donateMask) { donateMask.classList.remove('open'); }
+  }
+
+  function loadDonate(kind) {
+    var item = null, i;
+    for (i = 0; i < DONATE_KINDS.length; i++) {
+      if (DONATE_KINDS[i].key === kind) { item = DONATE_KINDS[i]; }
+    }
+    if (!item || !donateImg) { return; }
+    donateKind = kind;
+    for (var k in donateTabs) {
+      if (donateTabs.hasOwnProperty(k)) {
+        donateTabs[k].className = 'ckt-tab' + (k === kind ? ' on' : '');
+      }
+    }
+    donateTitle.textContent = item.title;
+    donateImg.alt = item.alt;
+    donateImg.src = item.src;          // 先走同源相对路径
+  }
+
+  function fallbackDonate(kind) {
+    var a = api();
+    if (donateTried[kind] || !a || !a.donate_image) {
+      // 两条路都没图（打包漏了 web\ 下的图）：给一句人话，别留个破图标
+      donateImg.style.display = 'none';
+      if (!donateMask.querySelector('.ckt-df.err')) {
+        var n = h('div', 'ckt-df err', '图片没加载出来 · 可到程序目录 web\\ 下查看');
+        donateImg.parentNode.insertBefore(n, donateImg.nextSibling);
+      }
+      return;
+    }
+    donateTried[kind] = true;
+    a.donate_image(kind).then(function (uri) {
+      if (uri) {
+        donateImg.style.display = '';
+        donateImg.src = uri;
+      }
+    }).catch(function () {});
   }
 
   function showDonate() {
@@ -356,34 +466,34 @@
       donateMask = h('div', 'ckt-mask');
       var card = h('div', 'ckt-donate');
       var bar = h('div', 'ckt-dh');
-      bar.appendChild(h('div', 'ckt-dt', '微信扫码捐赠'));
+      donateTitle = h('div', 'ckt-dt', DONATE_KINDS[0].title);
+      bar.appendChild(donateTitle);
       var bx = h('button', 'ckt-x', '\u00d7');
       bar.appendChild(bx);
-      var img = h('img');
-      img.alt = '微信支付捐赠码';
-      var fellBack = false;
-      img.onerror = function () {
-        if (fellBack) {
-          // 两条路都没图（打包漏了 web\donate.jpg 之类）：给一句人话，别留个破图标
-          if (img.parentNode) {
-            img.parentNode.replaceChild(
-              h('div', 'ckt-df', '图片没加载出来 · 可到程序目录 web\\donate.jpg 查看'), img
-            );
-          }
-          return;
-        }
-        fellBack = true;
-        var a = api();
-        if (a && a.donate_image) {
-          a.donate_image().then(function (uri) {
-            if (uri) { img.src = uri; }
-          }).catch(function () {});
-        }
-      };
-      img.src = '/donate.jpg';
+
+      var tabs = h('div', 'ckt-tabs');
+      DONATE_KINDS.forEach(function (it) {
+        var t = h('button', 'ckt-tab', it.name);
+        t.onclick = function () { loadDonate(it.key); };
+        donateTabs[it.key] = t;
+        tabs.appendChild(t);
+      });
+
+      donateImg = h('img');
+      donateImg.onerror = function () { fallbackDonate(donateKind); };
+
+      var dfoot = h('div', 'ckt-df');
+      dfoot.appendChild(h('span', null, '感谢支持 · 图片可右键另存'));
+      var dmail = h('a', 'ckt-mail', FEEDBACK_MAIL);
+      dmail.href = 'mailto:' + FEEDBACK_MAIL + '?subject=CUKTECH%20问题反馈';
+      dfoot.appendChild(h('br'));
+      dfoot.appendChild(h('span', null, '问题反馈：'));
+      dfoot.appendChild(dmail);
+
       card.appendChild(bar);
-      card.appendChild(img);
-      card.appendChild(h('div', 'ckt-df', '感谢支持 · 图片可右键另存'));
+      card.appendChild(tabs);
+      card.appendChild(donateImg);
+      card.appendChild(dfoot);
       donateMask.appendChild(card);
       document.body.appendChild(donateMask);
       bx.onclick = hideDonate;
@@ -392,6 +502,7 @@
       };
     }
     donateMask.classList.add('open');
+    loadDonate(donateKind);
   }
 
   up.donate.onclick = showDonate;
@@ -588,6 +699,11 @@
     });
     openPanel(true);
     // ?overlay=1&donate=1 直接把捐赠浮窗也展开，给「改完样式截一张图」用
-    if (/[?&]donate=1/.test(location.search)) { showDonate(); }
+    // &donate=alipay 额外切到支付宝页签，同样只为截图
+    var dm = /[?&]donate=(1|wechat|alipay)/.exec(location.search);
+    if (dm) {
+      showDonate();
+      if (dm[1] === 'alipay') { loadDonate('alipay'); }
+    }
   }
 })();

@@ -693,18 +693,27 @@ async def handle_index(request):
     return web.FileResponse(WEB_INDEX)
 
 
-async def handle_donate(request):
-    """捐赠码图片（v2.0.0）。
+def _send_web_image(name: str):
+    """web\\ 目录下的静图直出（捐赠码用）。
 
-    运行管理浮层的「捐赠」按钮要弹这张图：图片放在 index.html 旁边，
-    页面用相对路径 /donate.jpg 就能直接取到，不必再走 js_api 传 base64
+    图片就放在 index.html 旁边，页面用相对路径直接取，不必走 js_api 传 base64
     （120 KB 的图编码成 data URI 要 160 KB，每点一次都要过一遍 JSON 桥）。
     文件不存在就 404，浮层那边会自动退回 js_api 的 data URI。
     """
-    path = WEB_INDEX.parent / "donate.jpg"
+    path = WEB_INDEX.parent / name
     if not path.is_file():
-        return web.json_response({"ok": False, "error": "缺少 donate.jpg"}, status=404)
+        return web.json_response({"ok": False, "error": f"缺少 {name}"}, status=404)
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+
+
+async def handle_donate(request):
+    """微信收款码（v2.0.0）。"""
+    return _send_web_image("donate.jpg")
+
+
+async def handle_alipay(request):
+    """支付宝收款码（v2.0.0 追加，和 /donate.jpg 同构）。"""
+    return _send_web_image("alipay.jpg")
 
 
 async def handle_connect(request):
@@ -919,6 +928,7 @@ def create_app():
 
     app.router.add_get("/", handle_index)
     app.router.add_get("/donate.jpg", handle_donate)
+    app.router.add_get("/alipay.jpg", handle_alipay)
     app.router.add_post("/api/connect", handle_connect)
     app.router.add_post("/api/disconnect", handle_disconnect)
     app.router.add_get("/api/status", handle_status)

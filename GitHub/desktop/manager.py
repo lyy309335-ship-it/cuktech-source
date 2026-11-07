@@ -245,13 +245,14 @@ class Bridge:
         return self._app.set_tray_power(bool(enabled))
 
     # --- 捐赠（v2.0.0）
-    def donate_image(self):
+    def donate_image(self, kind="wechat"):
         """把捐赠码图片编成 data URI 交给浮层。
 
+        kind: "wechat"（默认，web\\donate.jpg）/ "alipay"（web\\alipay.jpg）。
         只在控制台窗口停在本地引导页（file:// 打开、取不到 /donate.jpg）时
         才会走到这里；正常从 8080 加载时浮层直接引相对路径，不过这道桥。
         """
-        return self._app.donate_image()
+        return self._app.donate_image(kind)
 
     # --- 自动开端口（时间窗 / 端口范围都可配）
     def set_auto_port(self, enabled):
@@ -476,19 +477,28 @@ class Manager:
         self.sync_tray()
         return {"ok": True, **self.snapshot()}
 
-    def donate_image(self) -> str:
+    # 渠道 -> web 目录里的文件名。两张图都不大，第一次取就编成 data URI 记住。
+    _DONATE_FILES = {"wechat": "donate.jpg", "alipay": "alipay.jpg"}
+
+    def donate_image(self, kind="wechat") -> str:
         """捐赠码的 data URI（兜底通道，见 Bridge.donate_image）。"""
-        cached = getattr(self, "_donate_uri", None)
-        if cached:
-            return cached
-        path = paths.resource("web", "donate.jpg")
+        kind = (kind or "wechat").strip().lower()
+        cache = getattr(self, "_donate_uri", None)
+        if cache is None:
+            cache = self._donate_uri = {}
+        if kind in cache:
+            return cache[kind]
+        name = self._DONATE_FILES.get(kind)
+        if not name:
+            return ""
+        path = paths.resource("web", name)
         try:
             raw = path.read_bytes()
         except OSError as exc:
-            log(f"捐赠图片读取失败 {exc!r}")
+            log(f"捐赠图片读取失败 {name} {exc!r}")
             return ""
         uri = "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
-        self._donate_uri = uri
+        cache[kind] = uri
         return uri
 
     def quit(self) -> None:
