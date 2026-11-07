@@ -120,6 +120,20 @@
     '.ckt-mini:disabled{opacity:.5;cursor:not-allowed}',
     '.ckt-up-hi{color:#6ee7d6!important}',
     '.ckt-up-err{color:#f09696!important}',
+
+    // v2.0.0 捐赠浮窗：盖在整页上（z 比面板高一层），点空白/×/Esc 都能关
+    '.ckt-mask{position:fixed;inset:0;z-index:' + (Z + 5) + ';display:none;align-items:center;',
+    'justify-content:center;background:rgba(8,10,14,.74);backdrop-filter:blur(3px);padding:16px}',
+    '.ckt-mask.open{display:flex}',
+    '.ckt-donate{width:360px;max-width:100%;max-height:100%;overflow:auto;background:#141720;',
+    'border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:12px;',
+    'box-shadow:0 24px 60px rgba(0,0,0,.6);font:13px/1.45 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif;',
+    'color:#e8ecf4;user-select:none}',
+    '.ckt-donate .ckt-dh{display:flex;align-items:center;gap:8px;margin-bottom:9px}',
+    '.ckt-donate .ckt-dt{flex:1;font-size:12.5px;font-weight:600}',
+    '.ckt-donate img{display:block;width:100%;border-radius:11px;background:#fff}',
+    '.ckt-donate .ckt-df{margin-top:9px;font-size:10.5px;color:#6c7488;text-align:center;line-height:1.6}',
+
     '.ckt-toast{position:fixed;right:16px;bottom:104px;z-index:' + Z + ';padding:7px 12px;border-radius:9px;',
     'background:rgba(23,26,33,.95);border:1px solid rgba(255,255,255,.12);color:#dfe5f0;',
     'font:12px/1.4 inherit;opacity:0;transform:translateY(6px);transition:.2s;pointer-events:none;max-width:280px}',
@@ -194,6 +208,8 @@
 
   var swService = row('采集服务', '蓝牙读取充电器数据，关掉后所有控制失效');
   var swWidget = row('桌面卡片', '常驻桌面的小窗，关掉可省内存');
+  // v2.0.0：托盘图标上到底写不写瓦数。关掉只影响「读数」，采集和控制在页面上照旧。
+  var swTrayPower = row('托盘功率', '在托盘图标上直接显示当前瓦数');
   var swAutostart = row('开机自启', '登录系统后自动在托盘运行');
 
   // v1.6.0：「自动开启设置」整块搬去了控制台网页的「设备设置 > 场景设置」，
@@ -218,8 +234,19 @@
     prog.appendChild(fill);
     box.appendChild(r);
     box.appendChild(prog);
+
+    // v2.0.0：捐赠入口放在版本更新这块里（用户看「有没有新版」的地方顺便就能支持一下）
+    var dr = h('div', 'ckt-row');
+    var dtxt = h('div', 'ckt-txt');
+    dtxt.appendChild(h('div', 'ckt-t1', '支持开发'));
+    dtxt.appendChild(h('div', 'ckt-t2', '微信扫码，随心打赏'));
+    dr.appendChild(dtxt);
+    var dbtn = h('button', 'ckt-mini', '捐赠');
+    dr.appendChild(dbtn);
+    box.appendChild(dr);
+
     panel.appendChild(box);
-    return { t2: t2, act: act, prog: prog, fill: fill };
+    return { t2: t2, act: act, prog: prog, fill: fill, donate: dbtn };
   })();
   var lastUpdate = null;
 
@@ -312,6 +339,63 @@
     });
   };
 
+  // ---------------- 捐赠浮窗（v2.0.0）
+  // 第一次点才建 DOM：绝大多数人不会点，没必要每次注入都创建一堆节点。
+  // 图片来源有两条路：
+  //   1. /donate.jpg —— 图片就躺在 web\ 目录里，控制台页面同源，浏览器自己缓存；
+  //   2. js_api 的 data URI —— 窗口停在本地引导页（file:// 源）时相对路径取不到，
+  //      由 Python 把 web\donate.jpg 读出来编成 data URI 兜底。
+  var donateMask = null;
+
+  function hideDonate() {
+    if (donateMask) { donateMask.classList.remove('open'); }
+  }
+
+  function showDonate() {
+    if (!donateMask) {
+      donateMask = h('div', 'ckt-mask');
+      var card = h('div', 'ckt-donate');
+      var bar = h('div', 'ckt-dh');
+      bar.appendChild(h('div', 'ckt-dt', '微信扫码捐赠'));
+      var bx = h('button', 'ckt-x', '\u00d7');
+      bar.appendChild(bx);
+      var img = h('img');
+      img.alt = '微信支付捐赠码';
+      var fellBack = false;
+      img.onerror = function () {
+        if (fellBack) {
+          // 两条路都没图（打包漏了 web\donate.jpg 之类）：给一句人话，别留个破图标
+          if (img.parentNode) {
+            img.parentNode.replaceChild(
+              h('div', 'ckt-df', '图片没加载出来 · 可到程序目录 web\\donate.jpg 查看'), img
+            );
+          }
+          return;
+        }
+        fellBack = true;
+        var a = api();
+        if (a && a.donate_image) {
+          a.donate_image().then(function (uri) {
+            if (uri) { img.src = uri; }
+          }).catch(function () {});
+        }
+      };
+      img.src = '/donate.jpg';
+      card.appendChild(bar);
+      card.appendChild(img);
+      card.appendChild(h('div', 'ckt-df', '感谢支持 · 图片可右键另存'));
+      donateMask.appendChild(card);
+      document.body.appendChild(donateMask);
+      bx.onclick = hideDonate;
+      donateMask.onclick = function (e) {
+        if (e.target === donateMask) { hideDonate(); }
+      };
+    }
+    donateMask.classList.add('open');
+  }
+
+  up.donate.onclick = showDonate;
+
   var btns = h('div', 'ckt-btns');
   var btnData = h('button', 'ckt-btn', '数据目录');
   var btnQuit = h('button', 'ckt-btn ckt-danger', '退出');
@@ -360,6 +444,8 @@
 
     swService.classList.toggle('on', running);
     swWidget.classList.toggle('on', !!s.widgetRunning);
+    // 老配置里没有这个键时按「开」兜底，和 Python 侧 load_conf 的默认值一致
+    swTrayPower.classList.toggle('on', s.trayPower !== false);
     swAutostart.classList.toggle('on', !!s.autostart);
     if (s.dataDir) { foot.textContent = '数据目录：' + s.dataDir; }
     paintUpdate(s.update);
@@ -391,6 +477,7 @@
 
   swService.onclick = function () { toggle(swService, 'set_service', '采集服务'); };
   swWidget.onclick = function () { toggle(swWidget, 'set_widget', '桌面卡片'); };
+  swTrayPower.onclick = function () { toggle(swTrayPower, 'set_tray_power', '托盘功率'); };
   swAutostart.onclick = function () { toggle(swAutostart, 'set_autostart', '开机自启'); };
 
   btnData.onclick = function () {
@@ -477,9 +564,11 @@
     } catch (e) {}
   }, 6000);
 
-  // Esc 关闭
+  // Esc 关闭（先关捐赠浮窗，再关面板）
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && panel.classList.contains('open')) { openPanel(false); }
+    if (e.key !== 'Escape') { return; }
+    if (donateMask && donateMask.classList.contains('open')) { hideDonate(); return; }
+    if (panel.classList.contains('open')) { openPanel(false); }
   });
 
   refresh();
@@ -489,8 +578,8 @@
   if (preview && !api()) {
     paint({
       serviceReady: true, serviceRunning: true, total: 45.2,
-      widgetRunning: true, autostart: false,
-      version: '1.7.0',
+      widgetRunning: true, autostart: false, trayPower: true,
+      version: '2.0.0',
       dataDir: 'C:\\Users\\xy309\\AppData\\Local\\CUKTECH\\data',
       update: {
         phase: 'available', current: '1.7.0', latest: '1.7.1',
@@ -498,5 +587,7 @@
       }
     });
     openPanel(true);
+    // ?overlay=1&donate=1 直接把捐赠浮窗也展开，给「改完样式截一张图」用
+    if (/[?&]donate=1/.test(location.search)) { showDonate(); }
   }
 })();

@@ -693,6 +693,20 @@ async def handle_index(request):
     return web.FileResponse(WEB_INDEX)
 
 
+async def handle_donate(request):
+    """捐赠码图片（v2.0.0）。
+
+    运行管理浮层的「捐赠」按钮要弹这张图：图片放在 index.html 旁边，
+    页面用相对路径 /donate.jpg 就能直接取到，不必再走 js_api 传 base64
+    （120 KB 的图编码成 data URI 要 160 KB，每点一次都要过一遍 JSON 桥）。
+    文件不存在就 404，浮层那边会自动退回 js_api 的 data URI。
+    """
+    path = WEB_INDEX.parent / "donate.jpg"
+    if not path.is_file():
+        return web.json_response({"ok": False, "error": "缺少 donate.jpg"}, status=404)
+    return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+
+
 async def handle_connect(request):
     mgr = request.app["ble"]
     result = await mgr.connect_and_auth()
@@ -904,6 +918,7 @@ def create_app():
     app["ble"] = BLEConnectionManager()
 
     app.router.add_get("/", handle_index)
+    app.router.add_get("/donate.jpg", handle_donate)
     app.router.add_post("/api/connect", handle_connect)
     app.router.add_post("/api/disconnect", handle_disconnect)
     app.router.add_get("/api/status", handle_status)

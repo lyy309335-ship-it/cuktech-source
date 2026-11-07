@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import base64
 import ctypes
 import json
 import os
@@ -35,8 +36,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import autoport, autostart, credentials, paths, updater
-from .icon import bolt_icon
+from . import autoport, autostart, credentials, icon as trayicon, paths, updater
 from .version import VERSION
 
 API = "http://127.0.0.1:8080"
@@ -240,6 +240,19 @@ class Bridge:
     def set_autostart(self, enabled):
         return self._app.set_autostart(bool(enabled))
 
+    def set_tray_power(self, enabled):
+        """托盘图标上是否写瓦数（v2.0.0，可在运行管理里自由开关）。"""
+        return self._app.set_tray_power(bool(enabled))
+
+    # --- 捐赠（v2.0.0）
+    def donate_image(self):
+        """把捐赠码图片编成 data URI 交给浮层。
+
+        只在控制台窗口停在本地引导页（file:// 打开、取不到 /donate.jpg）时
+        才会走到这里；正常从 8080 加载时浮层直接引相对路径，不过这道桥。
+        """
+        return self._app.donate_image()
+
     # --- 自动开端口（时间窗 / 端口范围都可配）
     def set_auto_port(self, enabled):
         autoport.set_logger(log)
@@ -336,6 +349,15 @@ class Manager:
         self.widget = Child("widget", "桌面卡片", ["--widget"])
         self.console = None            # 唯一的 WebView2 窗口
         self.tray_icon = None
+        # --- 托盘实时功率（托盘图标上直接写瓦数）
+        # pystray 换 icon 会 DestroyIcon + 重建 HICON，哪怕画面没变也会闪一下，
+        # 所以按「画面内容」做缓存，内容不变就完全不碰托盘。
+        self._tray_lock = threading.Lock()
+        self._tray_key = None          # (图标上显示的字, 是否已连接, 浅色任务栏)
+        self._tray_tip = None          # 最后一次设置过的悬停提示
+        self._tray_menu_sig = None     # 菜单里那些「会变的文字」的指纹
+        # v2.0.0：托盘上到底写不写瓦数，用户说了算（默认写，保持原有行为）
+        self._tray_power = bool(load_conf().get("tray_power", True))
         self._quitting = False
         self._state = {"ready": False, "connected": False, "total": 0.0, "raw": {}}
         self._console_open = False
@@ -389,6 +411,8 @@ class Manager:
             "total": round(self._state["total"], 2),
             "widgetRunning": self.widget.alive(),
             "autostart": autostart.is_enabled(),
+            # 托盘图标是否显示实时瓦数（v2.0.0 开关，落在 conf.json 的 tray_power）
+            "trayPower": self._tray_power,
             "ports": self._state["raw"].get("ports") or {},
             "portNames": [n for _k, n in PORTS],
             "settings": self._state["raw"].get("settings") or {},
@@ -434,6 +458,38 @@ class Manager:
         log(f"开机自启 -> {'开' if autostart.is_enabled() else '关'}")
         self.sync_tray()
         return {"ok": True, **self.snapshot()}
+
+    def set_tray_power(self, enabled: bool) -> dict:
+        """开关「托盘图标显示实时功率」（v2.0.0）。
+
+        关掉后图标退回纯闪电（不再随瓦数变数字），悬停提示和菜单首行也不再报数 ——
+        否则「关掉显示功率」却还能读到瓦数，用户会以为是没生效。
+        _tray_key 置空是必须的：sync_tray 按画面内容去重，键没变就完全不碰托盘，
+        那样这个开关看起来就毫无反应。
+        """
+        self._tray_power = bool(enabled)
+        save_conf(tray_power=self._tray_power)      # 下次启动沿用这个选择
+        with self._tray_lock:
+            self._tray_key = None
+            self._tray_tip = None
+        log(f"托盘功率显示 -> {'开' if self._tray_power else '关'}")
+        self.sync_tray()
+        return {"ok": True, **self.snapshot()}
+
+    def donate_image(self) -> str:
+        """捐赠码的 data URI（兜底通道，见 Bridge.donate_image）。"""
+        cached = getattr(self, "_donate_uri", None)
+        if cached:
+            return cached
+        path = paths.resource("web", "donate.jpg")
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            log(f"捐赠图片读取失败 {exc!r}")
+            return ""
+        uri = "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
+        self._donate_uri = uri
+        return uri
 
     def quit(self) -> None:
         if self._quitting:
@@ -781,12 +837,47 @@ class Manager:
                 self._cred_value = False
         return bool(getattr(self, "_cred_value", False))
 
+    def _port_watts(self) -> list[tuple[str, float]]:
+        """[(端口名, 瓦数)]。和 refresh() 里的求和是同一份 /api/status 数据，
+        保证图标上的总数和提示里的分口明细永远对得上。"""
+        ports = self._state["raw"].get("ports") or {}
+        out: list[tuple[str, float]] = []
+        for key, name in PORTS:
+            d = ports.get(key) or ports.get(int(key))
+            try:
+                out.append((name, float((d or {}).get("power") or 0)))
+            except (TypeError, ValueError, AttributeError):
+                out.append((name, 0.0))
+        return out
+
+    def _tray_tip_text(self) -> str:
+        """悬停提示：总功率（带 W）+ 正在出电的口，一屏就能读全。
+
+        v2.0.0：关掉「托盘显示功率」后这里也不再报数 —— 图标已经不写瓦数了，
+        提示里还留着数字，用户会以为开关没生效。
+        """
+        if not self._cred_ok():
+            return "CUKTECH 未配置凭据 · 点「设置设备凭据」"
+        if not self.service.alive():
+            return "CUKTECH 采集服务：已停止"
+        if not self._state["connected"]:
+            return "CUKTECH 采集服务：运行中（未连上设备）"
+        if not self._tray_power:
+            return "CUKTECH · 已连接（托盘功率显示已关闭）"
+        tip = f"CUKTECH · 总功率 {self._state['total']:.1f} W"
+        busy = [f"{name} {w:.1f}" for name, w in self._port_watts() if w >= 0.05]
+        if busy:
+            tip += "｜" + " · ".join(busy)
+        return tip[:120]   # szTip 上限 128 字符，留点余量
+
     def _tray_title(self, _item=None):
         if not self._cred_ok():
             return "未配置设备凭据 · 点「设置设备凭据」"
         if not self.service.alive():
             return "采集服务：已停止"
         if self._state["connected"]:
+            if not self._tray_power:
+                return "已连接"
             return f"已连接 · {self._state['total']:.1f} W"
         return "采集服务：运行中（未连上设备）"
 
@@ -818,6 +909,24 @@ class Manager:
             return "正在检查更新…"
         return "检查更新…"
 
+    def _update_sig(self) -> tuple:
+        s = updater.snapshot()
+        return (s.get("phase"), s.get("latest"), round(float(s.get("progress") or 0), 2))
+
+    def _menu_sig(self) -> tuple:
+        """菜单里会变的那几项。指纹没变就不重建菜单——
+        以前每 3 秒无条件 update_menu()，会在用户正翻菜单时把 HMENU 销毁重建。"""
+        return (
+            self._cred_ok(),
+            self.service.alive(),
+            self.widget.alive(),
+            self._console_open,
+            autostart.is_enabled(),
+            self._state["connected"],
+            self._tray_power,
+            self._update_sig(),
+        )
+
     def _open_update(self):
         """点更新项 = 打开运行管理浮层（版本、说明、按钮都在那儿，菜单里放不下）。"""
         self.show_console()
@@ -828,29 +937,56 @@ class Manager:
             updater.set_logger(log)
             updater.start_check(force=True)
 
-    def sync_tray(self) -> None:
+    def sync_tray(self, refresh: bool = True) -> None:
+        """把「当前总功率」同步到托盘：图标写瓦数、悬停提示写总数+分口。
+
+        refresh=False 时只重画、不重新取数（菜单点完之类的场合）。
+        """
+        if not self.tray_icon:
+            return
         try:
-            if not self.tray_icon:
-                return
-            self.refresh()
-            self.tray_icon.icon = bolt_icon(self._state["total"], self._state["connected"])
-            if not self._cred_ok():
-                self.tray_icon.title = "CUKTECH 未配置凭据"
-            elif self._state["connected"]:
-                self.tray_icon.title = f"CUKTECH  {self._state['total']:.1f} W"
-            else:
-                self.tray_icon.title = "CUKTECH 未连接"
-            self.tray_icon.update_menu()
+            if refresh:
+                self.refresh()          # 放在锁外：HTTP 最多 2 秒，别把菜单点击堵住
+            with self._tray_lock:
+                icon = self.tray_icon
+                if not icon:
+                    return
+                connected = bool(self._state["connected"])
+                total = float(self._state["total"])
+                # v2.0.0：开关关掉时按「0 W」画 —— icon.label_for 对 <1 W 返回空串，
+                # 走的正是「未连接 / 空载」那条纯闪电分支，不用另写一套画法。
+                power = total if self._tray_power else 0.0
+                light = trayicon.light_taskbar()
+                # 1) 图标：内容（显示的字 / 连接状态 / 任务栏配色）没变就别碰
+                key = (trayicon.label_for(power, connected), connected, light)
+                if key != self._tray_key:
+                    icon.icon = trayicon.tray_icon(power, connected, light)
+                    self._tray_key = key
+                # 2) 悬停提示：pystray 自己会比对文本，同样的串不会发 NIM_MODIFY
+                tip = self._tray_tip_text()
+                if tip != self._tray_tip:
+                    icon.title = tip
+                    self._tray_tip = tip
+                # 3) 菜单文字（勾选状态、更新进度）只在真的变了时重建
+                sig = self._menu_sig()
+                if sig != self._tray_menu_sig:
+                    icon.update_menu()
+                    self._tray_menu_sig = sig
         except Exception as exc:  # noqa: BLE001
             log(f"托盘刷新失败 {exc!r}")
 
     def _build_tray(self):
         import pystray
 
+        # 让 HICON 按通知区域真实像素（20px@125%）取，否则 pystray 取 SM_CXICON
+        # 那一帧（逻辑 32px）再被 Shell 缩到 20，0.625 倍把事情糊掉。
+        patched = trayicon.patch_pystray_icon_loader()
+        log(f"托盘图标 {trayicon.tray_pixels()}px 取图，接管 pystray={patched}")
+
         Menu, MenuItem = pystray.Menu, pystray.MenuItem
         self.tray_icon = pystray.Icon(
             "cuktech",
-            bolt_icon(0, False),
+            trayicon.tray_icon(0, False),
             "CUKTECH",
             menu=Menu(
                 MenuItem(self._tray_title, None, enabled=False),
@@ -951,6 +1087,20 @@ class Manager:
             pass
 
     # --- 监管
+    def _tray_loop(self) -> None:
+        """托盘的独立刷新节奏：1 秒一次，只动「图标 + 提示 + 菜单文字」。
+
+        为什么不复用 _supervise 那 3 秒：进程监管和应用状态是两件事，
+        功率是给人看的实时值，3 秒一跳太钝；而 1 秒重建一次 HICON 会闪，
+        所以 sync_tray 里按内容做了去重，画面不变时这里只是发一次本地 GET。
+        """
+        while not self._quitting:
+            try:
+                self.sync_tray()
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(1.0)
+
     def _supervise(self) -> None:
         while not self._quitting:
             for ch in (self.service, self.widget):
@@ -962,7 +1112,7 @@ class Manager:
                         # 但停在引导页的情况必须重新走一遍）
                         self._console_state = "idle"
             try:
-                self.sync_tray()
+                self.sync_tray(refresh=False)   # 取数交给 1 秒的 _tray_loop
             except Exception:  # noqa: BLE001
                 pass
             time.sleep(3.0)
@@ -1013,6 +1163,7 @@ class Manager:
         self._build_tray()
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
         threading.Thread(target=self._supervise, daemon=True).start()
+        threading.Thread(target=self._tray_loop, daemon=True).start()
         # 40 秒后再查更新：启动这一刻在连 BLE、等 8080 就绪，别抢时间
         updater.start_check_later(40.0)
 
