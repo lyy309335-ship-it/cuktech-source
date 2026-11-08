@@ -1,39 +1,26 @@
-# 酷态科 BLE 控制器
+# 酷态科 10 号充电器 · Windows 桌面控制台（中文速览）
 
-这是酷态科 10 号 GaN 充电器 Ultra 的本地 BLE 控制器和 Web 面板。项目通过本机蓝牙直连设备，不依赖云端控制。公开版本不包含真实设备 MAC、token、BLE key、日志、bugreport 或抓包文件。
+酷态科 10 号 GaN 充电器 Ultra 的本地蓝牙控制器。Windows 电脑通过 BLE 直连充电器，
+不经过米家云、不需要网关，就能实时看四个口的功率、开关端口、切场景模式、看历史曲线，
+并把桌面卡片和托盘读数常驻在屏幕上。
 
-完整教程请看：[从零开始使用 CUKTECH BLE Controller](docs/getting-started.zh-CN.md)
+**完整说明（功能清单、系统要求、目录结构、源码运行方式）见 [README.md](README.md)。**
 
-## 快速开始
+## 三句话上手
 
-```powershell
-cd cuktech-ble-controller
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e .
-```
+1. 到 [Releases](https://github.com/lyy309335-ship-it/cuktech-source/releases/latest) 下载
+   `CUKTECH-Setup_v2.0.0.exe`，双击安装（不需要管理员权限）。
+2. 首次启动用米家 App 扫窗口里的二维码，程序自动写入凭据并连上充电器。
+3. 平时只用两样东西：托盘图标（悬停看功率）和桌面上的小卡片（点端口直接开关）。
 
-配置环境变量：
+## 只支持 Windows
 
-```text
-CUKTECH_DEVICE_MAC=AA:BB:CC:DD:EE:FF
-CUKTECH_DEVICE_TOKEN=你的12字节hex token
-CUKTECH_DEVICE_BLE_KEY=可选的16字节hex BLE key
-CUKTECH_API_KEY=可选的本地API密钥
-CUKTECH_HOST=127.0.0.1
-CUKTECH_PORT=8080
-```
-
-运行命令：
-
-```bash
-python -m cuktech_ble_controller scan
-python -m cuktech_ble_controller status
-python -m cuktech_ble_controller web
-```
-
-Web 面板默认地址是 `http://127.0.0.1:8080`。如需局域网访问，请明确设置 `CUKTECH_HOST=0.0.0.0` 并配置 `CUKTECH_API_KEY`。
+当前版本只支持 **Windows 10 / 11（64 位）**：界面依赖 WebView2，桌面卡片是桌面窗口的子窗口，
+托盘走 Windows 通知区域，这些都没有 Linux / macOS 实现。装好后完整手册在程序目录，
+仓库里是 [`docs/使用说明.md`](docs/使用说明.md)。
 
 ## 安全提醒
 
-不要提交真实 MAC、token、BLE key、API key、数据库、日志、bugreport、抓包文件或手机诊断包。获取 token 的第三方工具请从原项目使用，本仓库只提供链接，不复制其代码。
+公开仓库不含真实 MAC、token、BLE key、日志或抓包文件。凭据只写在本机
+`%LOCALAPPDATA%\CUKTECH\.env`，不要外发；要开给局域网请先设置 `CUKTECH_API_KEY`。
+详见 [`SECURITY.md`](SECURITY.md)。

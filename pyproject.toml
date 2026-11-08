@@ -19,8 +19,19 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/zhyzhaogit/cuktech-ble-controller"
-Issues = "https://github.com/zhyzhaogit/cuktech-ble-controller/issues"
+Homepage = "https://github.com/lyy309335-ship-it/cuktech-source"
+Issues = "https://github.com/lyy309335-ship-it/cuktech-source/issues"
+# 协议实现的上游项目（同一个作者不一定，这里只是给个出处）
+Source = "https://github.com/kairui1108/cuktech-ble-server"
+
+# 桌面外壳（托盘 / 内嵌窗口 / 桌面卡片）额外需要的三个包。
+# 只跑命令行与 Web 面板不需要它们，所以没放进 dependencies。
+[project.optional-dependencies]
+desktop = [
+  "pywebview",
+  "pystray",
+  "pillow",
+]
 
 [project.scripts]
 cuktech-ble = "cuktech_ble_controller.__main__:main"

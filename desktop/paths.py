@@ -25,7 +25,7 @@ def is_frozen() -> bool:
 
 
 def resource_dir() -> Path:
-    """只读资源根目录：web/index.html、widget.html、panel.html、.env 等。"""
+    """只读资源根目录：web/index.html、widget.html、console_host.html、.env 等。"""
     if is_frozen():
         return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     return Path(__file__).resolve().parents[1]  # app/

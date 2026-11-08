@@ -1,11 +1,19 @@
-# 从零开始使用 CUKTECH BLE Controller
+# 从零开始使用 CUKTECH 充电器控制台（源码运行）
 
-这份教程面向第一次使用本项目的用户，目标是让你从设备准备、获取正确 token、配置环境变量，到成功读取充电器状态。
+这份教程面向拿到源码、想在自己电脑上跑起来的用户：从设备准备、获取正确 token、配置环境变量，
+到成功读取充电器状态、打开 Web 面板。
+
+> **平台限制：本项目当前只支持 Windows 10 / 11（64 位）。**
+> 图形界面依赖 WebView2，桌面卡片是桌面窗口的子窗口，托盘走 Windows 通知区域 ——
+> 没有任何 Linux / macOS 实现，也不要在 WSL 里跑（拿不到蓝牙适配器）。
+> 只想用现成程序的话，直接下载 Releases 里的 `CUKTECH-Setup_v2.0.0.exe` 安装即可，
+> 不需要看这份文档。
 
 ## 1. 你需要准备什么
 
-- 一台支持蓝牙的 Windows / Linux / macOS 电脑。
-- Python 3.9 或更高版本。
+- 一台 **Windows 10 / 11（64 位）** 电脑，且蓝牙可用（台式机需插蓝牙适配器）。
+- Python 3.9 或更高版本（从 <https://www.python.org/downloads/windows/> 安装，勾选
+  “Add python.exe to PATH”）。
 - 一台已通电、可被蓝牙扫描到的 CUKTECH 10 号 GaN 充电器 Ultra。
 - 绑定过该充电器的米家 / Xiaomi Home 账号。
 - 该账号所在地区信息。如果不确定，token 工具可以尝试扫描全部地区。
@@ -14,29 +22,35 @@
 
 ## 2. 安装项目
 
+在 PowerShell 里执行：
+
 ```powershell
-git clone https://github.com/zhyzhaogit/cuktech-ble-controller.git
-cd cuktech-ble-controller
+git clone https://github.com/lyy309335-ship-it/cuktech-source.git
+cd cuktech-source
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e .
 ```
 
-Linux / macOS:
+如果 PowerShell 拒绝执行激活脚本，先运行一次（只影响当前用户）：
 
-```bash
-git clone https://github.com/zhyzhaogit/cuktech-ble-controller.git
-cd cuktech-ble-controller
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+这一步只装命令行 / Web 面板需要的依赖（`aiohttp`、`bleak`、`cryptography`）。
+要跑完整桌面端（托盘 + 控制台窗口 + 桌面卡片），再补三个界面依赖：
+
+```powershell
+python -m pip install pywebview pystray pillow
+# 或者：python -m pip install -e ".[desktop]"
 ```
 
 ## 3. 获取设备 MAC
 
 先让电脑靠近充电器，然后运行：
 
-```bash
+```powershell
 python -m cuktech_ble_controller scan
 ```
 
@@ -77,21 +91,23 @@ AA:BB:CC:DD:EE:FF
 
 `CUKTECH_API_KEY` 只是本项目 Web API 的访问保护密钥，和设备认证无关。
 
-### 4.2 推荐工具
+### 4.2 两条获取路径
 
-使用上游项目 Xiaomi Cloud Tokens Extractor：
+**路径 A（推荐，用安装包的用户）**：直接用程序自带的扫码向导。首次启动会弹出二维码，
+手机米家 App 扫一下就在本机写好 MAC / TOKEN / BLE KEY，不需要手动填任何值。
+已经配置过的机器想重新取：托盘右键 →「设置设备凭据…」。
 
-https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor
-
+**路径 B（源码运行 / 手动排查）**：使用上游项目 Xiaomi Cloud Tokens Extractor
+<https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor>。
 本仓库不复制该工具代码，原因是避免许可证、维护和安全风险。请从原项目下载或运行，并遵守它的说明。
 
-### 4.3 Windows 获取流程
+### 4.3 Windows 获取流程（路径 B）
 
 1. 打开上游项目 release 页面。
 2. 下载 Windows 版本的 `token_extractor.exe`。
 3. 运行工具。
 4. 按提示登录绑定过充电器的 Xiaomi Home / 米家账号。
-5. 如果支持二维码登录，优先使用二维码登录，避免在命令行输入密码。
+5. 优先使用二维码登录，避免在命令行输入密码。
 6. 选择你的账号地区；不确定时可按工具说明尝试全部地区。
 7. 在输出设备列表中找到 CUKTECH 充电器。
 8. 记录该设备的：
@@ -101,20 +117,7 @@ https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor
 
 你要填入本项目的是该设备条目下的 `TOKEN`，不是账号登录过程中的临时 token。
 
-### 4.4 Linux / macOS 获取流程
-
-按上游项目 README 操作。常见手动方式是：
-
-```bash
-python3 -m venv token-env
-source token-env/bin/activate
-python3 -m pip install -r requirements.txt
-python3 token_extractor.py
-```
-
-具体命令以 Xiaomi Cloud Tokens Extractor 当前 README 为准。
-
-### 4.5 如何判断 token 看起来正确
+### 4.4 如何判断 token 看起来正确
 
 正确的 `CUKTECH_DEVICE_TOKEN` 应该满足：
 
@@ -133,13 +136,15 @@ python3 token_extractor.py
 
 ## 5. 配置环境变量
 
-复制示例文件：
+复制仓库根目录的模板：
 
-```bash
-copy examples\.env.example .env
+```powershell
+copy .env.example .env
 ```
 
-PowerShell 用户可以直接设置当前终端环境变量：
+然后用记事本或 VS Code 打开 `.env`，填入自己的 MAC / TOKEN。
+
+也可以只给当前终端设环境变量（关掉终端就失效）：
 
 ```powershell
 $env:CUKTECH_DEVICE_MAC="AA:BB:CC:DD:EE:FF"
@@ -148,18 +153,9 @@ $env:CUKTECH_HOST="127.0.0.1"
 $env:CUKTECH_PORT="8080"
 ```
 
-Linux / macOS:
-
-```bash
-export CUKTECH_DEVICE_MAC="AA:BB:CC:DD:EE:FF"
-export CUKTECH_DEVICE_TOKEN="00112233445566778899aabb"
-export CUKTECH_HOST="127.0.0.1"
-export CUKTECH_PORT="8080"
-```
-
 如果你要让局域网内其他设备访问 Web UI，再设置：
 
-```bash
+```text
 CUKTECH_HOST=0.0.0.0
 CUKTECH_API_KEY=设置一个你自己的长随机密钥
 ```
@@ -170,25 +166,25 @@ CUKTECH_API_KEY=设置一个你自己的长随机密钥
 
 先确认能扫描：
 
-```bash
+```powershell
 python -m cuktech_ble_controller scan
 ```
 
 再读取基础信息：
 
-```bash
+```powershell
 python -m cuktech_ble_controller info
 ```
 
 测试认证：
 
-```bash
+```powershell
 python -m cuktech_ble_controller auth
 ```
 
 如果认证成功，再读取状态：
 
-```bash
+```powershell
 python -m cuktech_ble_controller status
 ```
 
@@ -196,7 +192,7 @@ python -m cuktech_ble_controller status
 
 ## 7. 启动 Web UI
 
-```bash
+```powershell
 python -m cuktech_ble_controller web
 ```
 
@@ -210,6 +206,12 @@ http://127.0.0.1:8080
 
 ```text
 X-API-Key: 你的密钥
+```
+
+想用完整桌面端（托盘 + 内嵌控制台窗口 + 桌面卡片），改用：
+
+```powershell
+python main.py
 ```
 
 ## 8. 常见问题
@@ -246,6 +248,11 @@ X-API-Key: 你的密钥
 - 先在命令行确认 `auth` 和 `status` 可以成功。
 - 确认 Web 服务是在设置环境变量之后启动的。
 - 如果浏览器和服务不在同一台机器，确认 `CUKTECH_HOST` 和 `CUKTECH_API_KEY` 配置正确。
+
+### 双击程序没反应 / 窗口一片空白
+
+Windows 上最常见的原因是缺 WebView2 运行时。程序启动前会自检并给中文提示和官方下载链接；
+手动确认可以看「设置 → 应用 → 已安装的应用」里有没有 “Microsoft Edge WebView2 Runtime”。
 
 ## 9. 安全提醒
 

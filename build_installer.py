@@ -28,12 +28,20 @@ APP_OUT = DIST / "CUKTECH"
 PAYLOAD_DIR = HERE / "build" / "payload"
 PAYLOAD_ZIP = PAYLOAD_DIR / "payload.zip"
 SETUP_EXE = DIST / "CUKTECH-Setup.exe"
-# 装着「每个版本改了什么」，装完会复制到程序目录根下
-CHANGELOG = HERE / "版本更新说明.md"
+# 装着「每个版本改了什么」，装完会复制到程序目录根下，在程序目录里仍叫「版本更新说明.md」。
+# 仓库里的名字是 CHANGELOG.md；旧的开发工作区（app\ + 分发\ 两层）里叫「版本更新说明.md」，
+# 两种都认，谁在就用谁 —— 换过布局之后构建不该因为一个文件名就起不来。
+CHANGELOG_NAMES = ("CHANGELOG.md", "版本更新说明.md")
+CHANGELOG = next(
+    (HERE / name for name in CHANGELOG_NAMES if (HERE / name).is_file()),
+    HERE / CHANGELOG_NAMES[0],
+)
+# 装到程序目录 / 分发目录时用的文件名（安装器和用户手册认的都是这个中文名）
+CHANGELOG_BUNDLE_NAME = "版本更新说明.md"
 # 项目根目录下还留着一份给人看的同名副本。它不参与打包（打包只认 CHANGELOG），
 # 以前靠手抄同步，结果一直停在旧版本。构建成功后自动回写，杜绝两份打架。
 ROOT = HERE.parent
-CHANGELOG_MIRROR = ROOT / "版本更新说明.md"
+CHANGELOG_MIRROR = ROOT / CHANGELOG_BUNDLE_NAME
 # 安装包档案库（只增不改）与「整个文件夹发给别人」的分发目录
 ARCHIVE = ROOT / "安装包"
 ARCHIVE_HISTORY = ARCHIVE / "历史"
@@ -41,8 +49,26 @@ DIST_DIR = ROOT / "分发"
 
 # 文档里写死安装包文件名的地方，构建时对着版本号核一遍
 # （原 `分发\先看这里.txt` 那份分发说明已在 v1.8.2 并入 `使用说明.md`，
-#   所以这里只剩这两份；以后再加文档记得同步进这个元组，否则漏核）
-VERSIONED_DOCS = ("使用说明.md", "README.md")
+#   所以这里只剩这几份；以后再加文档记得同步进这个元组，否则漏核）
+# 带路径的写法是为了同时兼容「源码在 app\ 里、文档在上一层」的旧开发工作区
+# 和「源码与文档都在仓库根」的标准结构，谁在就核谁。
+VERSIONED_DOCS = (
+    "使用说明.md",
+    "docs/使用说明.md",
+    "README.md",
+    "README.zh-CN.md",
+)
+VERSIONED_DOC_ROOTS = (ROOT, HERE)
+# 面向使用者的手册：旧布局在项目根目录，标准结构在 docs\ 下
+MANUAL = next(
+    (
+        root / name
+        for name in ("使用说明.md", "docs/使用说明.md")
+        for root in VERSIONED_DOC_ROOTS
+        if (root / name).is_file()
+    ),
+    ROOT / "使用说明.md",
+)
 SETUP_NAME_RE = re.compile(r"CUKTECH-Setup_v(\d+\.\d+\.\d+)\.exe")
 
 # 版本号的「派生副本」。唯一来源永远是 desktop/version.py ——
@@ -124,14 +150,16 @@ def assert_version_consistency(version: str) -> None:
     # 2) 文档里写死的安装包名必须是当前版本
     stale: list[str] = []
     for name in VERSIONED_DOCS:
-        doc = ROOT / name
-        if not doc.is_file():
+        doc = next(
+            (root / name for root in VERSIONED_DOC_ROOTS if (root / name).is_file()),
+            None,
+        )
+        if doc is None:
             continue
-        for m in SETUP_NAME_RE.finditer(doc.read_text(encoding="utf-8", errors="replace")):
+        content = doc.read_text(encoding="utf-8", errors="replace")
+        for m in SETUP_NAME_RE.finditer(content):
             if m.group(1) != version:
-                line_no = doc.read_text(encoding="utf-8", errors="replace")[
-                    : m.start()
-                ].count("\n") + 1
+                line_no = content[: m.start()].count("\n") + 1
                 stale.append(f"{name}:{line_no}  {m.group(0)}")
     if stale:
         raise SystemExit(
@@ -312,8 +340,8 @@ def sync_distribution_docs() -> None:
         return
 
     jobs = [
-        (CHANGELOG, DIST_DIR / CHANGELOG.name),
-        (ROOT / "使用说明.md", DIST_DIR / "使用说明.md"),
+        (CHANGELOG, DIST_DIR / CHANGELOG_BUNDLE_NAME),
+        (MANUAL, DIST_DIR / "使用说明.md"),
         (HERE / ".env.example", DIST_DIR / ".env.example"),
     ]
     # 取码工具：分发版不依赖源码 venv，这三件得跟着走
@@ -583,6 +611,19 @@ def publish_release(version: str, repo: str, manifest: Path) -> None:
     print(f"    清单：https://github.com/{repo}/releases/latest/download/update.json")
 
 
+def stage_changelog_for_bundle() -> Path:
+    """把更新说明复制成「装进安装器时该有的文件名」。
+
+    仓库里这份叫 CHANGELOG.md，而安装器（installer/installer.py）和用户手册认的是
+    「版本更新说明.md」。PyInstaller 的 --add-data 不能给单个文件改名，所以先复制一份
+    再塞进去 —— 和 CUKTECH.spec 里 .env 那个 shim 是同一个道理。
+    """
+    dst = HERE / "build" / "changelog" / CHANGELOG_BUNDLE_NAME
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(CHANGELOG.read_bytes())
+    return dst
+
+
 def main() -> None:
     py = str(Path(sys.executable))
     publish = "--publish" in sys.argv
@@ -649,7 +690,7 @@ def main() -> None:
         "--add-data", f"{PAYLOAD_ZIP};payload",
         # 版本更新说明：装完由 installer.copy_changelog() 复制到程序目录根下。
         # 不走 payload.zip，是因为它不属于应用运行时资源，没必要进 _internal。
-        "--add-data", f"{CHANGELOG};.",
+        "--add-data", f"{stage_changelog_for_bundle()};.",
         "--add-data", f"{HERE / 'app.ico'};.",
         "--distpath", str(DIST),
         "--workpath", str(work_setup),

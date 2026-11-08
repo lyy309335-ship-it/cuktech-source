@@ -41,7 +41,11 @@ datas = [
 # 取码工具跟着安装包走（用户不用另外找），落在 _internal\tools\。
 # 只挑运行期真要用的三个文件：整个 tools\ 目录塞进去会把调试脚本、截图和
 # __pycache__ 一起带进包里（v1.8.0 实测多出 200 KB 且毫无意义）。
-_TOOLS = HERE.parent / "tools"
+# 旧开发工作区里 tools\ 在上一层，标准结构里就在仓库根，两种都认。
+_TOOLS = next(
+    (p for p in (HERE / "tools", HERE.parent / "tools") if p.is_dir()),
+    HERE / "tools",
+)
 for _name in ("token_extractor.exe", "collect_credentials.py", "watch_qr.py"):
     _f = _TOOLS / _name
     if _f.is_file():
