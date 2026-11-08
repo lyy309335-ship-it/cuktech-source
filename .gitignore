@@ -1,68 +1,42 @@
-# ============================================================
-#  仓库根 .gitignore
-#  只提交源码与文档；凭据、运行时数据、构建产物一律排除
-#
-#  v1.5.0：源码目录 app\ 已改名 GitHub\，下面这些路径必须跟着改。
-#  原来整份文件都指向 /app/...，改名之后全部失效 —— 表现是
-#  GitHub\dist、GitHub\data、GitHub\logs 都变成「可提交」状态。
-# ============================================================
-
-# ---- 安装包（体积大，发 GitHub Releases）----
-/*.exe
-/*.msi
-/*.zip
-/安装包/**/*.exe
-/分发/*.exe
-/分发/tools/*.exe
-# 分发目录里的历史存档整块不进版本库：里面是旧取码工具（含 19 MB 的
-# token_extractor.exe）和已合并的旧文档，只为本地留档，没有入库价值
-/分发/历史_*/
-
-# ---- 构建产物 ----
-/GitHub/dist/
-/GitHub/build/
-/GitHub/_backup_*/
-/GitHub/*.spec.bak
-/GitHub/*.bak
-/GitHub/*.bak-*
-/GitHub/*.bak_*
-
-# ---- 运行时数据（历史库、WebView2 缓存、自动开关状态）----
-/GitHub/data/
-/GitHub/logs/
-
-# ---- 设备凭据：绝不提交 ----
-/GitHub/.env
-/GitHub/.env.local
-/secrets.json
-
-# ---- 第三方二进制工具 ----
-/tools/*.exe
-# 取码脚本的原始输出留档（含真实三码，绝不提交）
-/tools/out/
-
-# ---- Python ----
+# Python
 __pycache__/
 *.py[cod]
-*.egg-info/
-.venv/
-venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
 
-# ---- 本地调试残留 ----
-*.bak
-*.bak-*
-*.bak_*
-*.orig
-*.rej
-*~
+# Runtime state
+*.log
+*.err
+*.pid
+*.db
+*.sqlite
+*.jsonl
+history/
 
-# ---- 系统与编辑器 ----
-Thumbs.db
-desktop.ini
-.DS_Store
-/NVIDIA Corporation/
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+secrets.json
+auth.json
+*.key
+*.pem
+
+# Diagnostics and archives
+bugreport-*/
+BLEDebug/
+*.zip
+*.7z
+*.cfa
+
+# Editors and OS
 .idea/
 .vscode/
+Thumbs.db
+.DS_Store
