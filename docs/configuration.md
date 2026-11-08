@@ -14,7 +14,7 @@
 | `CUKTECH_API_KEY` | Recommended for LAN use | 可选的本地 API 密钥，开了以后客户端要带 `X-API-Key`。 |
 | `CUKTECH_HOST` | No | Web 监听地址，默认 `127.0.0.1`。 |
 | `CUKTECH_PORT` | No | Web 端口，默认 `8080`。 |
-| `CUKTECH_DATA_DIR` | No | 历史功率库所在目录。命令行 / Web 面板默认 `~/.cuktech-ble-controller`，`.env.example` 里给的是 `./data`；桌面端固定用 `%LOCALAPPDATA%\CUKTECH\data`，不受这一项影响。 |
+| `CUKTECH_DATA_DIR` | No | 历史功率库所在目录。命令行 / Web 面板默认 `~/.cuktech-ble-controller`，`.env.example` 里给的是 `./data`；桌面端默认用 `%LOCALAPPDATA%\CUKTECH\data`，在 `.env` 里写成**绝对路径**可以覆盖它，相对路径会被忽略。 |
 | `CUKTECH_AUTO_CONNECT` | No | 启动即连接设备并在断线后重连，`1` 开 / `0` 关，默认 `1`。 |
 | `CUKTECH_APP_DATA_DIR` | No | 仅桌面端：覆盖数据目录（默认 `%LOCALAPPDATA%\CUKTECH\data`，源码运行时是 `data\`）。 |
 | `CUKTECH_APP_LOG_DIR` | No | 仅桌面端：覆盖日志目录（默认 `%LOCALAPPDATA%\CUKTECH\logs`，源码运行时是 `logs\`）。 |
